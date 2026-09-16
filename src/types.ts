@@ -31,13 +31,15 @@ export interface Transaction {
   amount: number; // Negative for expense, positive for income/exchange
   secondaryAmount: number; // In the other currency
   rate: number;
-  date: string; // ISO or human-readable "Hoy, 11:20 am"
+  date: string; // Human-readable display string, e.g. "Hoy, 11:20 am"
+  createdAt: string; // Real ISO timestamp, used for charts and date math
   groupDate: 'HOY' | 'AYER' | '15 NOV';
   reference: string;
   sudebanCode?: string;
   status: string;
   icon: string;
   note?: string;
+  receiptPath?: string; // Path in Supabase Storage to an uploaded receipt/invoice photo
   beneficiary?: {
     name: string;
     branch?: string;
@@ -45,16 +47,6 @@ export interface Transaction {
     bank?: string;
     phone?: string;
   };
-}
-
-export interface SavingsGoal {
-  id: string;
-  title: string;
-  targetAmount: number;
-  currentAmount: number;
-  targetDate: string;
-  percentage: number;
-  icon: string;
 }
 
 export interface CashBreakdown {
@@ -82,14 +74,18 @@ export interface Employee {
   id: string;
   name: string;
   position: string;
-  ci: string;
-  phone: string;
+  ci?: string;
+  phone?: string;
   monthlySalary: number; // USD
   paymentFrequency: 'quincenal' | 'mensual';
   paymentMethod: 'pago_movil' | 'cash_usd' | 'zinli';
   pagoMovilBank?: string;
   loans: EmployeeLoan[];
   status: 'active' | 'inactive';
+  // App access (optional — most employees are payroll-only records)
+  authUserId?: string;
+  assignedAccountId?: string;
+  exchangeCounterpartAccountId?: string;
 }
 
 export interface PayrollPayment {
@@ -106,6 +102,9 @@ export interface PayrollPayment {
   paidFromAccountId: string;
   reference: string;
   status: 'paid' | 'pending';
+  // Mixed payment: part of the net was paid from a second account (e.g. cash USD + Bs. pago móvil)
+  secondaryAccountId?: string;
+  secondaryAmountUSD?: number;
 }
 
 export interface RecurringExpense {
@@ -120,5 +119,26 @@ export interface RecurringExpense {
   isPaid: boolean;
   lastPaidDate?: string;
   accountId?: string;
+}
+
+export type TaskPriority = 'baja' | 'media' | 'alta';
+export type TaskStatus = 'pendiente' | 'en_progreso' | 'completada';
+
+export interface Task {
+  id: string;
+  assignedEmployeeId?: string;
+  title: string;
+  description?: string;
+  priority: TaskPriority;
+  status: TaskStatus;
+  dueDate?: string;
+}
+
+export interface EmployeeInvite {
+  code: string;
+  employeeId: string;
+  createdAt: string;
+  expiresAt: string;
+  usedAt?: string;
 }
 

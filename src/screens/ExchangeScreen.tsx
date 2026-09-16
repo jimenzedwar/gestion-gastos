@@ -6,7 +6,6 @@ import {
   ShieldCheck, 
   CheckCircle2, 
   ArrowRight, 
-  Zap, 
   RefreshCw,
   Info,
   Building2,
@@ -22,7 +21,6 @@ export const ExchangeScreen: React.FC = () => {
     performExchange,
     showToast,
     setSelectedTx,
-    setReceiptModalOpen,
     formatUSD,
     formatVES
   } = useApp();
@@ -60,6 +58,31 @@ export const ExchangeScreen: React.FC = () => {
     }
   }, [direction, accounts]);
 
+  const hasUsdAccount = accounts.some((a) => a.currency === 'USD');
+  const hasVesAccount = accounts.some((a) => a.currency === 'VES');
+
+  if (!hasUsdAccount || !hasVesAccount) {
+    return (
+      <div className="max-w-2xl mx-auto space-y-4 pb-20 md:pb-8 animate-in fade-in duration-300">
+        <div>
+          <h1 className="font-display font-bold text-2xl md:text-3xl text-[#131b2e] tracking-tight">
+            Cambio de Divisas
+          </h1>
+          <p className="text-xs md:text-sm text-[#434656] mt-0.5">
+            Convierte divisas en segundos con acreditación inmediata en cuentas bancarias y billeteras
+          </p>
+        </div>
+        <div className="bg-white rounded-3xl border border-[#eaedff] p-10 text-center space-y-3">
+          <div className="text-3xl">🏦</div>
+          <h3 className="font-display font-bold text-base text-[#131b2e]">Agrega tus cuentas primero</h3>
+          <p className="text-xs text-[#737688] max-w-xs mx-auto">
+            Necesitas al menos una cuenta en USD y otra en VES para poder cambiar divisas.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   const effectiveRate = isCustomRateActive ? customRate : bcvRate;
 
   const minutes = Math.floor(timeLeft / 60);
@@ -71,9 +94,11 @@ export const ExchangeScreen: React.FC = () => {
 
   // Calculations
   const isVesToUsd = direction === 'ves_to_usd';
-  const calculatedOutput = isVesToUsd 
+  const calculatedOutput = isVesToUsd
     ? (inputAmount > 0 && effectiveRate > 0 ? inputAmount / effectiveRate : 0)
     : inputAmount * effectiveRate;
+
+  const insufficientBalance = inputAmount > fromAccount.balance;
 
   const handleSwapDirection = () => {
     setDirection((prev) => (prev === 'usd_to_ves' ? 'ves_to_usd' : 'usd_to_ves'));
@@ -102,16 +127,15 @@ export const ExchangeScreen: React.FC = () => {
     }
 
     const tx = performExchange(
-      inputAmount, 
-      calculatedOutput, 
-      fromAccount.id, 
-      toAccount.id, 
-      effectiveRate, 
+      inputAmount,
+      calculatedOutput,
+      fromAccount.id,
+      toAccount.id,
+      effectiveRate,
       isVesToUsd
     );
 
     setSelectedTx(tx);
-    setReceiptModalOpen(true);
     showToast(
       isVesToUsd
         ? `Cambio completado: Bs. ${inputAmount.toLocaleString('es-VE')} ➔ $${calculatedOutput.toFixed(2)} USD`
@@ -123,19 +147,9 @@ export const ExchangeScreen: React.FC = () => {
     <div className="max-w-2xl mx-auto space-y-6 pb-20 md:pb-8 animate-in fade-in duration-300">
       {/* Header */}
       <div>
-        <div className="flex flex-wrap items-center gap-2">
-          <h1 className="font-display font-bold text-2xl md:text-3xl text-[#131b2e] tracking-tight">
-            Cambio de Divisas
-          </h1>
-          <span className="text-xs px-2.5 py-0.5 rounded-full bg-[#eaedff] text-[#0041c8] font-bold">
-            {direction === 'usd_to_ves' ? 'Dólares a Bolívares' : 'Bolívares a Dólares'}
-          </span>
-          {isCustomRateActive && (
-            <span className="text-xs px-2.5 py-0.5 rounded-full bg-[#fef3c7] text-[#b45309] font-bold">
-              Tasa Personalizada
-            </span>
-          )}
-        </div>
+        <h1 className="font-display font-bold text-2xl md:text-3xl text-[#131b2e] tracking-tight">
+          Cambio de Divisas
+        </h1>
         <p className="text-xs md:text-sm text-[#434656] mt-0.5">
           Convierte divisas en segundos con acreditación inmediata en cuentas bancarias y billeteras
         </p>
@@ -246,7 +260,7 @@ export const ExchangeScreen: React.FC = () => {
         </div>
 
         {/* Box 1: You deliver */}
-        <div className="p-4 sm:p-5 bg-[#faf8ff] rounded-2xl border border-[#eaedff] space-y-3">
+        <div className={`p-4 sm:p-5 bg-[#faf8ff] rounded-2xl border space-y-3 ${insufficientBalance ? 'border-[#ca1c43]' : 'border-[#eaedff]'}`}>
           <div className="flex items-center justify-between text-xs text-[#434656] font-semibold">
             <span>Tú entregas</span>
             <span className="truncate max-w-[200px] text-right">
@@ -290,6 +304,11 @@ export const ExchangeScreen: React.FC = () => {
                 ))}
             </select>
           </div>
+          {insufficientBalance && (
+            <div className="text-xs font-semibold text-[#a20030]">
+              Saldo insuficiente: solo tienes {isVesToUsd ? formatVES(fromAccount.balance) : formatUSD(fromAccount.balance)} disponible.
+            </div>
+          )}
         </div>
 
         {/* Quick Amount Chips */}
@@ -394,14 +413,17 @@ export const ExchangeScreen: React.FC = () => {
         <button
           type="button"
           onClick={handleConfirm}
-          className="w-full py-4 px-6 bg-[#0041c8] hover:bg-[#0036a8] text-white rounded-2xl font-display font-bold text-sm sm:text-base shadow-[0_8px_24px_rgba(0,65,200,0.28)] flex items-center justify-center gap-2 transition-all active:scale-[0.99]"
+          disabled={insufficientBalance || inputAmount <= 0}
+          className="w-full py-4 px-6 bg-[#0041c8] hover:bg-[#0036a8] disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-2xl font-display font-bold text-sm sm:text-base shadow-[0_8px_24px_rgba(0,65,200,0.28)] flex items-center justify-center gap-2 transition-all active:scale-[0.99]"
         >
           <span>
-            {isVesToUsd
+            {insufficientBalance
+              ? 'Saldo insuficiente'
+              : isVesToUsd
               ? `Confirmar Cambio (Bs. ${inputAmount.toLocaleString('es-VE')} ➔ $${calculatedOutput.toFixed(2)} USD)`
               : `Confirmar Cambio ($${inputAmount.toFixed(2)} ➔ Bs. ${calculatedOutput.toLocaleString('es-VE', { maximumFractionDigits: 0 })})`}
           </span>
-          <ArrowRight className="w-5 h-5" />
+          {!insufficientBalance && <ArrowRight className="w-5 h-5" />}
         </button>
       </div>
     </div>

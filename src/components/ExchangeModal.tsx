@@ -21,7 +21,6 @@ export const ExchangeModal: React.FC = () => {
     performExchange,
     showToast,
     setSelectedTx,
-    setReceiptModalOpen,
     formatUSD,
     formatVES
   } = useApp();
@@ -61,6 +60,32 @@ export const ExchangeModal: React.FC = () => {
 
   if (!exchangeModalOpen) return null;
 
+  const hasUsdAccount = accounts.some((a) => a.currency === 'USD');
+  const hasVesAccount = accounts.some((a) => a.currency === 'VES');
+
+  if (!hasUsdAccount || !hasVesAccount) {
+    return (
+      <div
+        className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#131b2e]/60 backdrop-blur-sm"
+        onClick={() => setExchangeModalOpen(false)}
+      >
+        <div className="w-full max-w-sm bg-white rounded-3xl p-6 text-center space-y-3 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+          <div className="text-3xl">🏦</div>
+          <h3 className="font-display font-bold text-base text-[#131b2e]">Agrega tus cuentas primero</h3>
+          <p className="text-xs text-[#737688]">
+            Necesitas al menos una cuenta en USD y otra en VES para poder cambiar divisas.
+          </p>
+          <button
+            onClick={() => setExchangeModalOpen(false)}
+            className="w-full py-2.5 px-4 bg-[#0041c8] text-white rounded-xl text-xs font-display font-bold"
+          >
+            Entendido
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   const effectiveRate = isCustomRateActive ? customRate : bcvRate;
   const isVesToUsd = direction === 'ves_to_usd';
 
@@ -71,9 +96,11 @@ export const ExchangeModal: React.FC = () => {
   const fromAccount = accounts.find((a) => a.id === fromAccountId) || accounts[0];
   const toAccount = accounts.find((a) => a.id === toAccountId) || accounts[1];
 
-  const calculatedOutput = isVesToUsd 
+  const calculatedOutput = isVesToUsd
     ? (inputAmount > 0 && effectiveRate > 0 ? inputAmount / effectiveRate : 0)
     : inputAmount * effectiveRate;
+
+  const insufficientBalance = inputAmount > fromAccount.balance;
 
   const handleQuickAdd = (add: number) => {
     setInputAmount((prev) => prev + add);
@@ -104,16 +131,15 @@ export const ExchangeModal: React.FC = () => {
     }
 
     const tx = performExchange(
-      inputAmount, 
-      calculatedOutput, 
-      fromAccount.id, 
-      toAccount.id, 
-      effectiveRate, 
+      inputAmount,
+      calculatedOutput,
+      fromAccount.id,
+      toAccount.id,
+      effectiveRate,
       isVesToUsd
     );
     setExchangeModalOpen(false);
     setSelectedTx(tx);
-    setReceiptModalOpen(true);
     showToast(
       isVesToUsd
         ? `Cambio exitoso: Bs. ${inputAmount.toLocaleString('es-VE')} ➔ $${calculatedOutput.toFixed(2)} USD`
@@ -122,10 +148,14 @@ export const ExchangeModal: React.FC = () => {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-[#131b2e]/60 backdrop-blur-xs animate-in fade-in duration-200">
-      <div 
+    <div
+      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-[#131b2e]/60 backdrop-blur-xs animate-in fade-in duration-200"
+      onClick={() => setExchangeModalOpen(false)}
+    >
+      <div
         id="exchange-modal-card"
         className="w-full max-w-lg bg-[#faf8ff] rounded-t-[32px] sm:rounded-3xl shadow-2xl border border-[#eaedff] flex flex-col max-h-[94vh] overflow-y-auto no-scrollbar animate-in slide-in-from-bottom-6 duration-300"
+        onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
         <div className="p-4 sm:p-5 pb-3 border-b border-[#eaedff] flex items-center justify-between">
@@ -213,7 +243,7 @@ export const ExchangeModal: React.FC = () => {
           </div>
 
           {/* Box 1: You deliver */}
-          <div className="bg-white p-4 rounded-2xl border border-[#eaedff] shadow-xs">
+          <div className={`bg-white p-4 rounded-2xl border shadow-xs ${insufficientBalance ? 'border-[#ca1c43]' : 'border-[#eaedff]'}`}>
             <div className="flex items-center justify-between text-xs text-[#434656] font-semibold mb-2">
               <span>Tú entregas</span>
               <span className="truncate max-w-[180px]">
@@ -242,6 +272,11 @@ export const ExchangeModal: React.FC = () => {
             <div className="mt-2 pt-2 border-t border-[#f2f3ff] text-xs text-[#737688]">
               Desde: <strong className="text-[#131b2e]">{fromAccount.name}</strong>
             </div>
+            {insufficientBalance && (
+              <div className="mt-2 text-xs font-semibold text-[#a20030]">
+                Saldo insuficiente: solo tienes {isVesToUsd ? formatVES(fromAccount.balance) : formatUSD(fromAccount.balance)} disponible.
+              </div>
+            )}
           </div>
 
           {/* Quick chips */}
@@ -311,9 +346,10 @@ export const ExchangeModal: React.FC = () => {
           <button
             type="button"
             onClick={handleConfirm}
-            className="w-full py-3.5 px-4 bg-[#0041c8] hover:bg-[#0036a8] text-white rounded-xl font-display font-bold text-sm shadow-[0_4px_16px_rgba(0,65,200,0.25)] flex items-center justify-center gap-2 transition-all active:scale-[0.99]"
+            disabled={insufficientBalance || inputAmount <= 0}
+            className="w-full py-3.5 px-4 bg-[#0041c8] hover:bg-[#0036a8] disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-xl font-display font-bold text-sm shadow-[0_4px_16px_rgba(0,65,200,0.25)] flex items-center justify-center gap-2 transition-all active:scale-[0.99]"
           >
-            <span>Confirmar Operación</span>
+            <span>{insufficientBalance ? 'Saldo insuficiente' : 'Confirmar Operación'}</span>
             <ArrowRight className="w-4 h-4" />
           </button>
         </div>

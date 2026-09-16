@@ -4,7 +4,6 @@ import { Transaction, Currency, TransactionType } from '../types';
 import { 
   Search, 
   Filter, 
-  Download, 
   Plus, 
   Receipt, 
   ArrowUpRight, 
@@ -84,24 +83,42 @@ export const MovementsScreen: React.FC = () => {
     return groups;
   }, [filteredTransactions]);
 
+  // Summary metrics computed from the real transaction history
+  const metrics = useMemo(() => {
+    let expenseUSD = 0;
+    let expenseCount = 0;
+    let incomeUSD = 0;
+    let incomeCount = 0;
+    let exchangedUSD = 0;
+    let exchangeCount = 0;
+
+    transactions.forEach((tx) => {
+      const rate = tx.rate || bcvRate;
+      if (tx.type === 'expense') {
+        expenseUSD += tx.currency === 'USD' ? Math.abs(tx.amount) : Math.abs(tx.amount) / rate;
+        expenseCount += 1;
+      } else if (tx.type === 'income') {
+        incomeUSD += tx.currency === 'USD' ? tx.amount : tx.amount / rate;
+        incomeCount += 1;
+      } else if (tx.type === 'exchange') {
+        exchangedUSD += tx.currency === 'USD' ? tx.amount : Math.abs(tx.secondaryAmount);
+        exchangeCount += 1;
+      }
+    });
+
+    return {
+      expenseUSD,
+      expenseCount,
+      incomeUSD,
+      incomeCount,
+      exchangedUSD,
+      exchangeCount,
+      netUSD: incomeUSD - expenseUSD
+    };
+  }, [transactions, bcvRate]);
+
   // Active inspected transaction
   const activeTx = selectedTx || transactions[0] || null;
-
-  const handleExportCSV = () => {
-    const headers = 'ID,Fecha,Concepto,Categoria,Cuenta,Tipo,Monto,Moneda,Referencia\n';
-    const rows = filteredTransactions.map(t => 
-      `"${t.id}","${t.date}","${t.title}","${t.category}","${t.accountName}","${t.type}","${t.amount}","${t.currency}","${t.reference}"`
-    ).join('\n');
-    const blob = new Blob([headers + rows], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.setAttribute('href', url);
-    link.setAttribute('download', `Monedero_Movimientos_${new Date().toISOString().slice(0, 10)}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    showToast('Exportación CSV completada');
-  };
 
   const handleCopyRef = (ref: string) => {
     navigator.clipboard?.writeText(ref);
@@ -113,27 +130,15 @@ export const MovementsScreen: React.FC = () => {
       {/* Top Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
-          <div className="flex items-center gap-2">
-            <h1 className="font-display font-bold text-2xl md:text-3xl text-[#131b2e] tracking-tight">
-              Movimientos
-            </h1>
-            <span className="text-xs px-2.5 py-0.5 rounded-full bg-[#eaedff] text-[#0041c8] font-bold">
-              Dual Currency Core
-            </span>
-          </div>
+          <h1 className="font-display font-bold text-2xl md:text-3xl text-[#131b2e] tracking-tight">
+            Movimientos
+          </h1>
           <p className="text-xs md:text-sm text-[#434656] mt-0.5">
             Registro unificado de transferencias, gastos en dólares, bolívares y pago móvil
           </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          <button
-            onClick={handleExportCSV}
-            className="flex items-center gap-1.5 px-3 py-2 bg-white text-[#434656] border border-[#eaedff] rounded-xl text-xs font-semibold shadow-xs hover:bg-[#f2f3ff] transition-all"
-          >
-            <Download className="w-3.5 h-3.5 text-[#0041c8]" />
-            <span>Exportar CSV</span>
-          </button>
           <button
             onClick={() => setQuickExpenseModalOpen(true)}
             className="flex items-center gap-1.5 px-3.5 py-2 bg-[#0041c8] text-white rounded-xl text-xs font-display font-bold shadow-md hover:bg-[#0036a8] transition-all active:scale-95"
@@ -147,42 +152,42 @@ export const MovementsScreen: React.FC = () => {
       {/* Metrics Row (4 summary cards matching Image 3 with responsive layout) */}
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 sm:gap-3.5">
         <div className="p-3.5 sm:p-4 bg-white rounded-2xl border border-[#eaedff] shadow-[0_2px_10px_rgba(19,27,46,0.03)]">
-          <div className="text-xs font-semibold text-[#737688]">Total Gastado (Mes)</div>
+          <div className="text-xs font-semibold text-[#737688]">Total Gastado</div>
           <div className="font-display text-lg sm:text-xl font-bold text-[#131b2e] mt-1 truncate">
-            $515,00
+            {formatUSD(metrics.expenseUSD)}
           </div>
           <div className="text-[11px] text-[#737688] font-medium mt-0.5 truncate">
-            ≈ Bs. 77.250,00 · 24 salidas
+            ≈ {formatVES(metrics.expenseUSD * bcvRate)} · {metrics.expenseCount} salidas
           </div>
         </div>
 
         <div className="p-3.5 sm:p-4 bg-white rounded-2xl border border-[#eaedff] shadow-[0_2px_10px_rgba(19,27,46,0.03)]">
           <div className="text-xs font-semibold text-[#737688]">Total Ingresado</div>
           <div className="font-display text-lg sm:text-xl font-bold text-[#006c49] mt-1 truncate">
-            +$700,00
+            {formatUSD(metrics.incomeUSD, true)}
           </div>
           <div className="text-[11px] text-[#006c49] font-medium mt-0.5 truncate">
-            ≈ Bs. 105.000,00 · 2 abonos
+            ≈ {formatVES(metrics.incomeUSD * bcvRate)} · {metrics.incomeCount} abonos
           </div>
         </div>
 
         <div className="p-3.5 sm:p-4 bg-white rounded-2xl border border-[#eaedff] shadow-[0_2px_10px_rgba(19,27,46,0.03)]">
           <div className="text-xs font-semibold text-[#737688]">Cambiado USD ↔ VES</div>
           <div className="font-display text-lg sm:text-xl font-bold text-[#0041c8] mt-1 truncate">
-            $120,00
+            {formatUSD(metrics.exchangedUSD)}
           </div>
           <div className="text-[11px] text-[#0041c8] font-medium mt-0.5 truncate">
-            a Bs. 18.000,00 · Tasa 150
+            a {formatVES(metrics.exchangedUSD * bcvRate)} · {metrics.exchangeCount} {metrics.exchangeCount === 1 ? 'cambio' : 'cambios'}
           </div>
         </div>
 
         <div className="p-3.5 sm:p-4 bg-white rounded-2xl border border-[#eaedff] shadow-[0_2px_10px_rgba(19,27,46,0.03)]">
-          <div className="text-xs font-semibold text-[#737688]">Balance Neto del Mes</div>
-          <div className="font-display text-lg sm:text-xl font-bold text-[#006c49] mt-1 truncate">
-            +$185,00
+          <div className="text-xs font-semibold text-[#737688]">Balance Neto</div>
+          <div className={`font-display text-lg sm:text-xl font-bold mt-1 truncate ${metrics.netUSD >= 0 ? 'text-[#006c49]' : 'text-[#a20030]'}`}>
+            {formatUSD(metrics.netUSD, true)}
           </div>
-          <div className="text-[11px] text-[#006c49] font-medium mt-0.5 truncate">
-            Ahorro activo positivo
+          <div className={`text-[11px] font-medium mt-0.5 truncate ${metrics.netUSD >= 0 ? 'text-[#006c49]' : 'text-[#a20030]'}`}>
+            {metrics.netUSD >= 0 ? 'Ahorro activo positivo' : 'Gastaste más de lo que ingresó'}
           </div>
         </div>
       </div>

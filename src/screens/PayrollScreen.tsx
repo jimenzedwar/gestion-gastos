@@ -1,35 +1,38 @@
 import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { Employee, EmployeeLoan } from '../types';
-import { 
-  Users, 
-  Plus, 
-  HandCoins, 
-  CreditCard, 
-  CheckCircle2, 
-  AlertCircle, 
-  ArrowDownRight, 
-  DollarSign, 
-  Receipt, 
-  Clock, 
-  Search, 
+import {
+  Users,
+  Plus,
+  HandCoins,
+  CreditCard,
+  CheckCircle2,
+  AlertCircle,
+  ArrowDownRight,
+  DollarSign,
+  Receipt,
+  Clock,
+  Search,
   X,
   Building2,
   Percent,
   FileText,
-  BadgeAlert
+  BadgeAlert,
+  ShieldCheck,
+  Copy
 } from 'lucide-react';
 
 export const PayrollScreen: React.FC = () => {
-  const { 
-    employees, 
-    payrollHistory, 
-    accounts, 
-    bcvRate, 
-    addEmployee, 
-    requestLoan, 
-    repayLoan, 
+  const {
+    employees,
+    payrollHistory,
+    accounts,
+    bcvRate,
+    addEmployee,
+    requestLoan,
+    repayLoan,
     processPayrollPayment,
+    grantEmployeeAccess,
     showToast,
     formatUSD,
     formatVES
@@ -43,12 +46,15 @@ export const PayrollScreen: React.FC = () => {
   const [newLoanModal, setNewLoanModal] = useState(false);
   const [repayModal, setRepayModal] = useState<{ employeeId: string; loanId: string; maxAmount: number; employeeName: string } | null>(null);
   const [processPayModal, setProcessPayModal] = useState<Employee | null>(null);
+  const [accessModal, setAccessModal] = useState<Employee | null>(null);
+  const [accessAccountId, setAccessAccountId] = useState<string>('');
+  const [accessCounterpartId, setAccessCounterpartId] = useState<string>('');
+  const [generatedCode, setGeneratedCode] = useState<string | null>(null);
+  const [grantingAccess, setGrantingAccess] = useState(false);
 
   // Form states: New Employee
   const [empName, setEmpName] = useState('');
   const [empPosition, setEmpPosition] = useState('');
-  const [empCI, setEmpCI] = useState('');
-  const [empPhone, setEmpPhone] = useState('');
   const [empSalary, setEmpSalary] = useState<number>(250);
   const [empFreq, setEmpFreq] = useState<'quincenal' | 'mensual'>('quincenal');
   const [empMethod, setEmpMethod] = useState<'pago_movil' | 'cash_usd' | 'zinli'>('pago_movil');
@@ -71,6 +77,9 @@ export const PayrollScreen: React.FC = () => {
   const [payrollAccountId, setPayrollAccountId] = useState<string>(accounts[1]?.id || accounts[0]?.id || '');
   const [payrollRate, setPayrollRate] = useState<number>(bcvRate);
   const [isCustomRate, setIsCustomRate] = useState<boolean>(false);
+  const [isMixedPayment, setIsMixedPayment] = useState<boolean>(false);
+  const [secondaryPayrollAccountId, setSecondaryPayrollAccountId] = useState<string>(accounts[0]?.id || '');
+  const [secondaryPayrollAmount, setSecondaryPayrollAmount] = useState<number>(0);
 
   // Summary KPIs
   const totalEmployees = employees.length;
@@ -82,20 +91,18 @@ export const PayrollScreen: React.FC = () => {
   const filteredEmployees = employees.filter((e) => {
     if (!searchQuery.trim()) return true;
     const q = searchQuery.toLowerCase();
-    return e.name.toLowerCase().includes(q) || e.position.toLowerCase().includes(q) || e.ci.includes(q);
+    return e.name.toLowerCase().includes(q) || e.position.toLowerCase().includes(q);
   });
 
   const handleCreateEmployee = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!empName.trim() || !empCI.trim()) {
-      showToast('Por favor completa el nombre y cédula del empleado');
+    if (!empName.trim()) {
+      showToast('Por favor completa el nombre del empleado');
       return;
     }
     addEmployee({
       name: empName.trim(),
       position: empPosition.trim() || 'Colaborador General',
-      ci: empCI.trim(),
-      phone: empPhone.trim() || '0414-0000000',
       monthlySalary: empSalary || 200,
       paymentFrequency: empFreq,
       paymentMethod: empMethod,
@@ -105,8 +112,6 @@ export const PayrollScreen: React.FC = () => {
     setNewEmployeeModal(false);
     setEmpName('');
     setEmpPosition('');
-    setEmpCI('');
-    setEmpPhone('');
   };
 
   const handleCreateLoan = (e: React.FormEvent) => {
@@ -143,13 +148,38 @@ export const PayrollScreen: React.FC = () => {
 
   const handleExecutePayroll = () => {
     if (!processPayModal) return;
+    if (isMixedPayment && !secondaryPayrollAccountId) {
+      showToast('Selecciona la segunda cuenta para el pago mixto');
+      return;
+    }
     processPayrollPayment(
       processPayModal.id,
       payrollPeriod,
       payrollAccountId,
-      isCustomRate ? payrollRate : bcvRate
+      isCustomRate ? payrollRate : bcvRate,
+      isMixedPayment ? { secondaryAccountId: secondaryPayrollAccountId, secondaryAmountUSD: secondaryPayrollAmount } : undefined
     );
     setProcessPayModal(null);
+    setIsMixedPayment(false);
+    setSecondaryPayrollAmount(0);
+  };
+
+  const handleGrantAccess = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!accessModal || !accessAccountId) {
+      showToast('Selecciona la cuenta que va a usar');
+      return;
+    }
+    setGrantingAccess(true);
+    const code = await grantEmployeeAccess(accessModal.id, accessAccountId, accessCounterpartId || undefined);
+    setGrantingAccess(false);
+    if (code) setGeneratedCode(code);
+  };
+
+  const handleCopyCode = () => {
+    if (!generatedCode) return;
+    navigator.clipboard?.writeText(generatedCode);
+    showToast('Código copiado');
   };
 
   return (
@@ -157,14 +187,9 @@ export const PayrollScreen: React.FC = () => {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
-          <div className="flex items-center gap-2">
-            <h1 className="font-display font-bold text-2xl md:text-3xl text-[#131b2e] tracking-tight">
-              Nómina & Adelantos
-            </h1>
-            <span className="text-xs px-2.5 py-0.5 rounded-full bg-[#6cf8bb]/40 text-[#00714d] font-bold">
-              Descuento Automático
-            </span>
-          </div>
+          <h1 className="font-display font-bold text-2xl md:text-3xl text-[#131b2e] tracking-tight">
+            Nómina
+          </h1>
           <p className="text-xs md:text-sm text-[#434656] mt-0.5">
             Gestión de salarios, préstamos personales y adelantos con deducción quincenal directa
           </p>
@@ -278,7 +303,7 @@ export const PayrollScreen: React.FC = () => {
             <Search className="w-4 h-4 text-[#737688] absolute left-3 top-2.5" />
             <input
               type="text"
-              placeholder="Buscar por nombre, cargo o cédula..."
+              placeholder="Buscar por nombre o cargo..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="w-full pl-9 pr-3 py-2 bg-white rounded-xl text-xs sm:text-sm font-medium border border-[#eaedff] outline-none focus:border-[#0041c8]"
@@ -307,9 +332,6 @@ export const PayrollScreen: React.FC = () => {
                           {emp.name}
                         </h3>
                         <p className="text-xs text-[#0041c8] font-semibold">{emp.position}</p>
-                        <p className="text-[11px] text-[#737688] font-mono mt-0.5">
-                          C.I. {emp.ci} · {emp.phone}
-                        </p>
                       </div>
 
                       <span className="px-2.5 py-0.5 rounded-full bg-[#f2f3ff] text-[#131b2e] text-[11px] font-bold border border-[#eaedff]">
@@ -353,6 +375,28 @@ export const PayrollScreen: React.FC = () => {
                         </span>
                       </div>
                     )}
+
+                    {/* App access status */}
+                    <div className="mt-2.5 flex items-center justify-between text-[11px]">
+                      {emp.authUserId ? (
+                        <span className="text-[#006c49] font-semibold flex items-center gap-1">
+                          <ShieldCheck className="w-3.5 h-3.5" />
+                          Acceso activo · {accounts.find((a) => a.id === emp.assignedAccountId)?.name || 'cuenta asignada'}
+                        </span>
+                      ) : (
+                        <button
+                          onClick={() => {
+                            setAccessModal(emp);
+                            setAccessAccountId(emp.assignedAccountId || accounts[0]?.id || '');
+                            setAccessCounterpartId(emp.exchangeCounterpartAccountId || '');
+                            setGeneratedCode(null);
+                          }}
+                          className="text-[#0041c8] font-bold hover:underline"
+                        >
+                          Dar acceso a la app
+                        </button>
+                      )}
+                    </div>
                   </div>
 
                   {/* Action Buttons */}
@@ -368,7 +412,12 @@ export const PayrollScreen: React.FC = () => {
                     </button>
 
                     <button
-                      onClick={() => setProcessPayModal(emp)}
+                      onClick={() => {
+                        setProcessPayModal(emp);
+                        setIsMixedPayment(false);
+                        setSecondaryPayrollAmount(0);
+                        setSecondaryPayrollAccountId(accounts.find((a) => a.id !== payrollAccountId)?.id || accounts[0]?.id || '');
+                      }}
                       className="px-4 py-2 bg-[#0041c8] hover:bg-[#0036a8] text-white rounded-xl text-xs font-display font-bold shadow-xs transition-colors"
                     >
                       Pagar Nómina
@@ -507,6 +556,12 @@ export const PayrollScreen: React.FC = () => {
                       Descuento por préstamo: -${item.deductedAmount.toFixed(2)}
                     </div>
                   )}
+                  {item.secondaryAccountId && item.secondaryAmountUSD ? (
+                    <div className="text-[11px] text-[#0041c8] font-semibold mt-1">
+                      Pago mixto: ${(item.netAmountUSD - item.secondaryAmountUSD).toFixed(2)} en {accounts.find((a) => a.id === item.paidFromAccountId)?.name || 'cuenta principal'}
+                      {' + '}${item.secondaryAmountUSD.toFixed(2)} en {accounts.find((a) => a.id === item.secondaryAccountId)?.name || 'segunda cuenta'}
+                    </div>
+                  ) : null}
                 </div>
 
                 <div className="text-left sm:text-right">
@@ -525,8 +580,8 @@ export const PayrollScreen: React.FC = () => {
 
       {/* Modal: Add Employee */}
       {newEmployeeModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#131b2e]/60 backdrop-blur-xs">
-          <div className="w-full max-w-lg bg-white rounded-3xl p-6 border border-[#eaedff] shadow-2xl space-y-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#131b2e]/60 backdrop-blur-xs" onClick={() => setNewEmployeeModal(false)}>
+          <div className="w-full max-w-lg bg-white rounded-3xl p-6 border border-[#eaedff] shadow-2xl space-y-4 max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between border-b border-[#eaedff] pb-3">
               <h3 className="font-display font-bold text-lg text-[#131b2e]">Registrar Nuevo Empleado</h3>
               <button onClick={() => setNewEmployeeModal(false)} className="p-1 rounded-full hover:bg-[#f2f3ff]">
@@ -559,36 +614,12 @@ export const PayrollScreen: React.FC = () => {
                   />
                 </div>
                 <div>
-                  <label className="text-xs font-semibold text-[#434656] block mb-1">Cédula de Identidad</label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="Ej. V-25.123.456"
-                    value={empCI}
-                    onChange={(e) => setEmpCI(e.target.value)}
-                    className="w-full px-3 py-2 bg-[#f2f3ff] rounded-xl text-xs sm:text-sm font-medium outline-none border border-transparent focus:border-[#0041c8] focus:bg-white"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs font-semibold text-[#434656] block mb-1">Teléfono Pago Móvil</label>
-                  <input
-                    type="text"
-                    placeholder="Ej. 0414-9876543"
-                    value={empPhone}
-                    onChange={(e) => setEmpPhone(e.target.value)}
-                    className="w-full px-3 py-2 bg-[#f2f3ff] rounded-xl text-xs sm:text-sm font-medium outline-none border border-transparent focus:border-[#0041c8] focus:bg-white"
-                  />
-                </div>
-                <div>
                   <label className="text-xs font-semibold text-[#434656] block mb-1">Sueldo Base Mensual (USD)</label>
                   <input
                     type="number"
                     min="50"
                     step="10"
-                    value={empSalary}
+                    value={empSalary || ''}
                     onChange={(e) => setEmpSalary(parseFloat(e.target.value) || 0)}
                     className="w-full px-3 py-2 bg-[#f2f3ff] rounded-xl text-xs sm:text-sm font-bold outline-none border border-transparent focus:border-[#0041c8] focus:bg-white"
                   />
@@ -643,8 +674,8 @@ export const PayrollScreen: React.FC = () => {
 
       {/* Modal: Request Loan or Advance */}
       {newLoanModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#131b2e]/60 backdrop-blur-xs">
-          <div className="w-full max-w-lg bg-white rounded-3xl p-6 border border-[#eaedff] shadow-2xl space-y-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#131b2e]/60 backdrop-blur-xs" onClick={() => setNewLoanModal(false)}>
+          <div className="w-full max-w-lg bg-white rounded-3xl p-6 border border-[#eaedff] shadow-2xl space-y-4 max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between border-b border-[#eaedff] pb-3">
               <h3 className="font-display font-bold text-lg text-[#131b2e]">Nuevo Adelanto o Préstamo</h3>
               <button onClick={() => setNewLoanModal(false)} className="p-1 rounded-full hover:bg-[#f2f3ff]">
@@ -709,7 +740,7 @@ export const PayrollScreen: React.FC = () => {
                     type="number"
                     min="5"
                     step="5"
-                    value={loanAmount}
+                    value={loanAmount || ''}
                     onChange={(e) => {
                       const val = parseFloat(e.target.value) || 0;
                       setLoanAmount(val);
@@ -728,7 +759,7 @@ export const PayrollScreen: React.FC = () => {
                     min="5"
                     step="5"
                     max={loanAmount}
-                    value={loanDeduction}
+                    value={loanDeduction || ''}
                     onChange={(e) => setLoanDeduction(parseFloat(e.target.value) || 0)}
                     className="w-full px-3 py-2 bg-[#f2f3ff] rounded-xl text-xs sm:text-sm font-bold outline-none border border-transparent focus:border-[#0041c8]"
                   />
@@ -793,8 +824,8 @@ export const PayrollScreen: React.FC = () => {
 
       {/* Modal: Early Loan Repayment */}
       {repayModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#131b2e]/60 backdrop-blur-xs">
-          <div className="w-full max-w-md bg-white rounded-3xl p-6 border border-[#eaedff] shadow-2xl space-y-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#131b2e]/60 backdrop-blur-xs" onClick={() => setRepayModal(null)}>
+          <div className="w-full max-w-md bg-white rounded-3xl p-6 border border-[#eaedff] shadow-2xl space-y-4 max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between border-b border-[#eaedff] pb-3">
               <div>
                 <h3 className="font-display font-bold text-lg text-[#131b2e]">Abono / Pago de Deuda</h3>
@@ -815,7 +846,7 @@ export const PayrollScreen: React.FC = () => {
                   min="1"
                   max={repayModal.maxAmount}
                   step="any"
-                  value={repayAmount}
+                  value={repayAmount || ''}
                   onChange={(e) => setRepayAmount(parseFloat(e.target.value) || 0)}
                   className="w-full px-3 py-2 bg-[#f2f3ff] rounded-xl text-xs sm:text-sm font-bold outline-none border border-transparent focus:border-[#0041c8]"
                 />
@@ -858,8 +889,8 @@ export const PayrollScreen: React.FC = () => {
 
       {/* Modal: Process Payroll Payment */}
       {processPayModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#131b2e]/60 backdrop-blur-xs">
-          <div className="w-full max-w-lg bg-white rounded-3xl p-6 border border-[#eaedff] shadow-2xl space-y-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#131b2e]/60 backdrop-blur-xs" onClick={() => setProcessPayModal(null)}>
+          <div className="w-full max-w-lg bg-white rounded-3xl p-6 border border-[#eaedff] shadow-2xl space-y-4 max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between border-b border-[#eaedff] pb-3">
               <div>
                 <h3 className="font-display font-bold text-lg text-[#131b2e]">Liquidación de Nómina</h3>
@@ -957,7 +988,9 @@ export const PayrollScreen: React.FC = () => {
                     </div>
 
                     <div>
-                      <label className="text-xs font-semibold text-[#434656] block mb-1">Pagar desde Cuenta de la Empresa</label>
+                      <label className="text-xs font-semibold text-[#434656] block mb-1">
+                        {isMixedPayment ? 'Cuenta principal (resto del pago)' : 'Pagar desde Cuenta de la Empresa'}
+                      </label>
                       <select
                         value={payrollAccountId}
                         onChange={(e) => setPayrollAccountId(e.target.value)}
@@ -970,6 +1003,48 @@ export const PayrollScreen: React.FC = () => {
                         ))}
                       </select>
                     </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setIsMixedPayment(!isMixedPayment)}
+                      className="text-[11px] text-[#0041c8] font-bold hover:underline"
+                    >
+                      {isMixedPayment ? '× Quitar pago mixto' : '+ Pagar mixto (ej. parte en efectivo, parte en Bs.)'}
+                    </button>
+
+                    {isMixedPayment && (
+                      <div className="p-3 bg-[#f2f3ff] rounded-xl border border-[#eaedff] space-y-3">
+                        <div>
+                          <label className="text-xs font-semibold text-[#434656] block mb-1">Segunda cuenta</label>
+                          <select
+                            value={secondaryPayrollAccountId}
+                            onChange={(e) => setSecondaryPayrollAccountId(e.target.value)}
+                            className="w-full px-3 py-2 bg-white rounded-xl text-xs font-semibold outline-none border border-transparent focus:border-[#0041c8]"
+                          >
+                            {accounts.filter((a) => a.id !== payrollAccountId).map((a) => (
+                              <option key={a.id} value={a.id}>
+                                {a.name} ({a.currency === 'USD' ? formatUSD(a.balance) : formatVES(a.balance)})
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="text-xs font-semibold text-[#434656] block mb-1">Monto a pagar desde esa cuenta (USD)</label>
+                          <input
+                            type="number"
+                            min="0"
+                            max={netUSD}
+                            step="any"
+                            value={secondaryPayrollAmount || ''}
+                            onChange={(e) => setSecondaryPayrollAmount(Math.min(parseFloat(e.target.value) || 0, netUSD))}
+                            className="w-full px-3 py-2 bg-white rounded-xl text-xs font-bold outline-none border border-transparent focus:border-[#0041c8]"
+                          />
+                        </div>
+                        <div className="text-[11px] text-[#434656] pt-1 border-t border-[#eaedff]">
+                          Cuenta principal: <strong>${(netUSD - secondaryPayrollAmount).toFixed(2)}</strong> · Segunda cuenta: <strong>${secondaryPayrollAmount.toFixed(2)}</strong>
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   <div className="pt-3 border-t border-[#eaedff] flex items-center justify-end gap-2">
@@ -991,6 +1066,109 @@ export const PayrollScreen: React.FC = () => {
                 </div>
               );
             })()}
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Grant App Access */}
+      {accessModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#131b2e]/60 backdrop-blur-xs"
+          onClick={() => setAccessModal(null)}
+        >
+          <div
+            className="w-full max-w-md bg-white rounded-3xl p-6 border border-[#eaedff] shadow-2xl space-y-4 max-h-[85vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-[#eaedff] pb-3">
+              <div>
+                <h3 className="font-display font-bold text-lg text-[#131b2e]">Dar Acceso a la App</h3>
+                <p className="text-xs text-[#737688]">{accessModal.name}</p>
+              </div>
+              <button onClick={() => setAccessModal(null)} className="p-1 rounded-full hover:bg-[#f2f3ff]">
+                <X className="w-5 h-5 text-[#737688]" />
+              </button>
+            </div>
+
+            {generatedCode ? (
+              <div className="space-y-4">
+                <div className="p-4 bg-[#6cf8bb]/20 border border-[#6cf8bb]/50 rounded-2xl text-center space-y-2">
+                  <ShieldCheck className="w-8 h-8 text-[#006c49] mx-auto" />
+                  <p className="text-xs text-[#434656] font-medium">
+                    Comparte este código con {accessModal.name} para que cree su acceso (dura 7 días):
+                  </p>
+                  <div className="flex items-center justify-center gap-2">
+                    <span className="font-mono font-bold text-2xl tracking-wider text-[#131b2e]">{generatedCode}</span>
+                    <button onClick={handleCopyCode} className="p-2 bg-white rounded-xl border border-[#eaedff] hover:bg-[#f2f3ff]">
+                      <Copy className="w-4 h-4 text-[#0041c8]" />
+                    </button>
+                  </div>
+                </div>
+                <p className="text-[11px] text-[#737688]">
+                  Cuando lo use, entrará viendo solo la cuenta que le asignaste — nunca la nómina, cuentas ni otros empleados.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setAccessModal(null)}
+                  className="w-full py-2.5 px-4 bg-[#0041c8] hover:bg-[#0036a8] text-white rounded-xl text-xs font-display font-bold shadow-md"
+                >
+                  Listo
+                </button>
+              </div>
+            ) : (
+              <form onSubmit={handleGrantAccess} className="space-y-3.5">
+                <div>
+                  <label className="text-xs font-semibold text-[#434656] block mb-1">Cuenta que va a operar</label>
+                  <select
+                    value={accessAccountId}
+                    onChange={(e) => setAccessAccountId(e.target.value)}
+                    className="w-full px-3 py-2 bg-[#f2f3ff] rounded-xl text-xs sm:text-sm font-semibold outline-none border border-transparent focus:border-[#0041c8]"
+                  >
+                    {accounts.map((a) => (
+                      <option key={a.id} value={a.id}>{a.name} ({a.currency})</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="text-xs font-semibold text-[#434656] block mb-1">
+                    Cuenta contraparte para cambios de divisa (opcional)
+                  </label>
+                  <select
+                    value={accessCounterpartId}
+                    onChange={(e) => setAccessCounterpartId(e.target.value)}
+                    className="w-full px-3 py-2 bg-[#f2f3ff] rounded-xl text-xs sm:text-sm font-semibold outline-none border border-transparent focus:border-[#0041c8]"
+                  >
+                    <option value="">Ninguna — no hará cambios de moneda</option>
+                    {accounts.filter((a) => a.id !== accessAccountId).map((a) => (
+                      <option key={a.id} value={a.id}>{a.name} ({a.currency})</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="p-3 bg-[#f2f3ff] rounded-xl text-[11px] text-[#434656]">
+                  {accessModal.name} solo podrá ver y usar {accessCounterpartId ? 'estas dos cuentas' : 'esta cuenta'} —
+                  nunca el resto del negocio, la nómina ni otros empleados.
+                </div>
+
+                <div className="pt-3 border-t border-[#eaedff] flex items-center justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setAccessModal(null)}
+                    className="px-4 py-2 text-xs font-bold text-[#434656] hover:bg-[#f2f3ff] rounded-xl"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={grantingAccess}
+                    className="px-5 py-2.5 bg-[#0041c8] hover:bg-[#0036a8] disabled:opacity-60 text-white rounded-xl text-xs font-display font-bold shadow-md"
+                  >
+                    {grantingAccess ? 'Generando...' : 'Generar Código'}
+                  </button>
+                </div>
+              </form>
+            )}
           </div>
         </div>
       )}

@@ -1,25 +1,20 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
-import { 
-  Eye, 
-  EyeOff, 
-  ArrowUpRight, 
-  ArrowDownLeft, 
-  Repeat, 
-  MoreHorizontal, 
-  CreditCard, 
-  Smartphone, 
-  Wallet, 
-  Calculator, 
-  Copy, 
-  Check, 
-  TrendingUp, 
-  Zap, 
-  Building2, 
-  Calendar, 
-  Target,
-  ArrowRight,
-  Sparkles
+import { useAuth } from '../context/AuthContext';
+import {
+  Eye,
+  EyeOff,
+  ArrowUpRight,
+  ArrowDownLeft,
+  Repeat,
+  MoreHorizontal,
+  CreditCard,
+  Smartphone,
+  Wallet,
+  Calculator,
+  Copy,
+  Check,
+  ArrowRight
 } from 'lucide-react';
 
 export const HomeScreen: React.FC = () => {
@@ -29,9 +24,9 @@ export const HomeScreen: React.FC = () => {
     hideBalances,
     toggleHideBalances,
     bcvRate,
+    eurRate,
     accounts,
     transactions,
-    savingsGoal,
     setCurrentTab,
     setQuickExpenseModalOpen,
     setExchangeModalOpen,
@@ -41,6 +36,9 @@ export const HomeScreen: React.FC = () => {
     formatUSD,
     formatVES
   } = useApp();
+  const { user } = useAuth();
+
+  const displayName = (user?.user_metadata?.full_name as string | undefined)?.trim() || user?.email?.split('@')[0] || '';
 
   // Pago Móvil Quick Calculator State
   const [calcUsd, setCalcUsd] = useState<string>('25');
@@ -48,6 +46,42 @@ export const HomeScreen: React.FC = () => {
 
   const calcNum = parseFloat(calcUsd) || 0;
   const calcVes = calcNum * bcvRate;
+
+  const weeklyDeltaUSD = useMemo(() => {
+    const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
+    return transactions.reduce((sum, tx) => {
+      if (tx.type === 'exchange') return sum;
+      const txTime = new Date(tx.createdAt).getTime();
+      if (Number.isNaN(txTime) || txTime < cutoff) return sum;
+      const usdVal = tx.currency === 'USD' ? tx.amount : tx.amount / (tx.rate || bcvRate);
+      return sum + usdVal;
+    }, 0);
+  }, [transactions, bcvRate]);
+
+  const CATEGORY_COLORS = ['#0041c8', '#006c49', '#ca1c43', '#737688', '#f59e0b', '#8b5cf6'];
+
+  const categoryBreakdown = useMemo(() => {
+    const map: Record<string, { emoji: string; usd: number }> = {};
+    let totalUSD = 0;
+    transactions.forEach((tx) => {
+      if (tx.type !== 'expense') return;
+      const usdVal = tx.currency === 'USD' ? Math.abs(tx.amount) : Math.abs(tx.amount) / (tx.rate || bcvRate);
+      totalUSD += usdVal;
+      const key = tx.category || 'Otros';
+      if (!map[key]) map[key] = { emoji: tx.categoryEmoji || '💸', usd: 0 };
+      map[key].usd += usdVal;
+    });
+    const items = Object.entries(map)
+      .map(([name, v]) => ({
+        name,
+        emoji: v.emoji,
+        usd: v.usd,
+        percent: totalUSD > 0 ? Math.round((v.usd / totalUSD) * 100) : 0
+      }))
+      .sort((a, b) => b.usd - a.usd)
+      .slice(0, 4);
+    return { total: totalUSD, items };
+  }, [transactions, bcvRate]);
 
   const handleCopyPagoMovil = () => {
     const formattedBs = calcVes.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -63,10 +97,12 @@ export const HomeScreen: React.FC = () => {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
         <div>
           <h1 className="font-display font-bold text-2xl md:text-3xl text-[#131b2e] tracking-tight">
-            Hola, Alejandro 👋
+            Hola{displayName ? `, ${displayName}` : ''} 👋
           </h1>
           <p className="text-xs md:text-sm text-[#434656] mt-0.5">
-            Así se mueve tu dinero hoy en Caracas · Tasa BCV: <strong className="text-[#0041c8]">Bs. {bcvRate.toFixed(2)}</strong>
+            Tasa BCV Oficial: <strong className="text-[#0041c8]">$1 = Bs. {bcvRate.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
+            {' · '}
+            <strong className="text-[#0041c8]">€1 = Bs. {eurRate.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
           </p>
         </div>
 
@@ -75,7 +111,6 @@ export const HomeScreen: React.FC = () => {
             onClick={() => setQuickExpenseModalOpen(true)}
             className="flex items-center gap-1.5 px-3.5 py-2 bg-[#0041c8] text-white rounded-xl text-xs font-display font-bold shadow-md hover:bg-[#0036a8] transition-all active:scale-95"
           >
-            <Zap className="w-3.5 h-3.5 text-[#6cf8bb]" />
             <span>Anotar Gasto</span>
           </button>
           <button
@@ -109,7 +144,7 @@ export const HomeScreen: React.FC = () => {
               </button>
             </div>
             <span className="px-2.5 py-1 rounded-full bg-white/15 backdrop-blur-md text-[11px] font-bold text-[#6cf8bb]">
-              + $180,00 esta semana
+              {formatUSD(weeklyDeltaUSD, true)} esta semana
             </span>
           </div>
 
@@ -120,25 +155,6 @@ export const HomeScreen: React.FC = () => {
             </div>
             <div className="font-display text-sm sm:text-lg font-semibold text-[#6cf8bb] mt-1">
               ≈ {formatVES(totalBalanceVES)}
-            </div>
-          </div>
-
-          {/* Savings goal progress bar strip */}
-          <div className="mt-5 p-3 rounded-xl bg-white/10 backdrop-blur-md border border-white/15">
-            <div className="flex items-center justify-between text-xs mb-1.5">
-              <span className="font-semibold text-[#e3e6ff] flex items-center gap-1.5">
-                <Target className="w-3.5 h-3.5 text-[#6cf8bb]" />
-                {savingsGoal.title}
-              </span>
-              <span className="font-bold text-white">
-                {savingsGoal.percentage}% ({formatUSD(savingsGoal.currentAmount)} / {formatUSD(savingsGoal.targetAmount)})
-              </span>
-            </div>
-            <div className="w-full bg-black/20 h-2 rounded-full overflow-hidden">
-              <div
-                className="bg-gradient-to-r from-[#6cf8bb] to-[#4edea3] h-full rounded-full transition-all duration-500"
-                style={{ width: `${savingsGoal.percentage}%` }}
-              ></div>
             </div>
           </div>
 
@@ -154,7 +170,7 @@ export const HomeScreen: React.FC = () => {
               <div className="w-10 h-10 rounded-full bg-white/20 flex items-center justify-center group-hover:scale-105 transition-transform">
                 <ArrowDownLeft className="w-5 h-5 text-white" />
               </div>
-              <span className="text-[11px] font-bold text-[#e3e6ff]">Ingresar</span>
+              <span className="text-[11px] font-bold text-[#e3e6ff]">Ingreso</span>
             </button>
 
             <button
@@ -164,7 +180,7 @@ export const HomeScreen: React.FC = () => {
               <div className="w-10 h-10 rounded-full bg-[#ca1c43] flex items-center justify-center group-hover:scale-105 transition-transform shadow-sm">
                 <ArrowUpRight className="w-5 h-5 text-white" />
               </div>
-              <span className="text-[11px] font-bold text-[#e3e6ff]">Gastar</span>
+              <span className="text-[11px] font-bold text-[#e3e6ff]">Egreso</span>
             </button>
 
             <button
@@ -174,7 +190,7 @@ export const HomeScreen: React.FC = () => {
               <div className="w-10 h-10 rounded-full bg-[#006c49] flex items-center justify-center group-hover:scale-105 transition-transform shadow-sm">
                 <Repeat className="w-5 h-5 text-[#6cf8bb]" />
               </div>
-              <span className="text-[11px] font-bold text-[#e3e6ff]">Cambiar</span>
+              <span className="text-[11px] font-bold text-[#e3e6ff]">Cambio</span>
             </button>
 
             <button
@@ -207,6 +223,18 @@ export const HomeScreen: React.FC = () => {
             </button>
           </div>
 
+          {accounts.length === 0 ? (
+            <div className="p-6 bg-white rounded-2xl border border-[#eaedff] text-center space-y-2">
+              <div className="text-2xl">🏦</div>
+              <p className="text-xs text-[#737688]">No tienes cuentas agregadas todavía.</p>
+              <button
+                onClick={() => setCurrentTab('perfil')}
+                className="text-xs font-bold text-[#0041c8] hover:underline"
+              >
+                + Agregar tu primera cuenta
+              </button>
+            </div>
+          ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
             {accounts.slice(0, 4).map((acc) => {
               const isUSD = acc.currency === 'USD';
@@ -266,6 +294,7 @@ export const HomeScreen: React.FC = () => {
               );
             })}
           </div>
+          )}
         </div>
 
         {/* Right 1 Col: Pago Móvil Instant Calculator */}
@@ -347,76 +376,48 @@ export const HomeScreen: React.FC = () => {
         </div>
       </div>
 
-      {/* Monthly Budget & Spending Categories Breakdown */}
+      {/* Spending Categories Breakdown */}
       <div className="bg-white p-6 rounded-2xl border border-[#eaedff] shadow-[0_2px_12px_rgba(19,27,46,0.03)] space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
           <div>
             <h2 className="font-display font-bold text-lg text-[#131b2e]">
-              ¿En qué he gastado este mes?
+              ¿En qué has gastado?
             </h2>
-            <p className="text-xs text-[#434656]">Desglose de gastos en divisas y bolívares</p>
+            <p className="text-xs text-[#434656]">Desglose por categoría, en divisas y bolívares</p>
           </div>
-          <div className="flex items-center gap-2">
-            <span className="text-xs px-2.5 py-1 bg-[#6cf8bb]/30 text-[#00714d] font-bold rounded-full">
-              Vas $42 por debajo del límite previsto
+          {categoryBreakdown.total > 0 && (
+            <span className="text-xs px-2.5 py-1 bg-[#eaedff] text-[#0041c8] font-bold rounded-full">
+              Total: {formatUSD(categoryBreakdown.total)}
             </span>
-          </div>
+          )}
         </div>
 
-        {/* Categories Progress Bars */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
-          {/* Item 1 */}
-          <div className="p-3 bg-[#faf8ff] rounded-xl border border-[#eaedff]">
-            <div className="flex items-center justify-between text-xs font-semibold mb-1.5">
-              <span className="flex items-center gap-1.5 text-[#131b2e]">
-                <span>🛒</span> Comida & Mercado
-              </span>
-              <span className="text-[#0041c8] font-bold">$210,00 (Bs. 31.500) · 41%</span>
-            </div>
-            <div className="w-full bg-[#eaedff] h-2.5 rounded-full overflow-hidden">
-              <div className="bg-[#0041c8] h-full rounded-full" style={{ width: '41%' }}></div>
-            </div>
+        {categoryBreakdown.items.length === 0 ? (
+          <div className="py-6 text-center text-xs text-[#737688]">
+            Aún no tienes gastos registrados. Anota tu primer gasto para ver el desglose aquí.
           </div>
-
-          {/* Item 2 */}
-          <div className="p-3 bg-[#faf8ff] rounded-xl border border-[#eaedff]">
-            <div className="flex items-center justify-between text-xs font-semibold mb-1.5">
-              <span className="flex items-center gap-1.5 text-[#131b2e]">
-                <span>🏦</span> Ahorro Retenido
-              </span>
-              <span className="text-[#006c49] font-bold">$150,00 (Bs. 22.500) · 29%</span>
-            </div>
-            <div className="w-full bg-[#eaedff] h-2.5 rounded-full overflow-hidden">
-              <div className="bg-[#006c49] h-full rounded-full" style={{ width: '29%' }}></div>
-            </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
+            {categoryBreakdown.items.map((item, idx) => (
+              <div key={item.name} className="p-3 bg-[#faf8ff] rounded-xl border border-[#eaedff]">
+                <div className="flex items-center justify-between text-xs font-semibold mb-1.5">
+                  <span className="flex items-center gap-1.5 text-[#131b2e]">
+                    <span>{item.emoji}</span> {item.name}
+                  </span>
+                  <span className="font-bold" style={{ color: CATEGORY_COLORS[idx % CATEGORY_COLORS.length] }}>
+                    {formatUSD(item.usd)} · {item.percent}%
+                  </span>
+                </div>
+                <div className="w-full bg-[#eaedff] h-2.5 rounded-full overflow-hidden">
+                  <div
+                    className="h-full rounded-full"
+                    style={{ width: `${item.percent}%`, backgroundColor: CATEGORY_COLORS[idx % CATEGORY_COLORS.length] }}
+                  ></div>
+                </div>
+              </div>
+            ))}
           </div>
-
-          {/* Item 3 */}
-          <div className="p-3 bg-[#faf8ff] rounded-xl border border-[#eaedff]">
-            <div className="flex items-center justify-between text-xs font-semibold mb-1.5">
-              <span className="flex items-center gap-1.5 text-[#131b2e]">
-                <span>☕</span> Salidas & Cafecito
-              </span>
-              <span className="text-[#a20030] font-bold">$90,00 (Bs. 13.500) · 18%</span>
-            </div>
-            <div className="w-full bg-[#eaedff] h-2.5 rounded-full overflow-hidden">
-              <div className="bg-[#ca1c43] h-full rounded-full" style={{ width: '18%' }}></div>
-            </div>
-          </div>
-
-          {/* Item 4 */}
-          <div className="p-3 bg-[#faf8ff] rounded-xl border border-[#eaedff]">
-            <div className="flex items-center justify-between text-xs font-semibold mb-1.5">
-              <span className="flex items-center gap-1.5 text-[#131b2e]">
-                <span>💡</span> Servicios & Fibra NetUno
-              </span>
-              <span className="text-[#737688] font-bold">$65,00 (Bs. 9.750) · 12%</span>
-            </div>
-            <div className="w-full bg-[#eaedff] h-2.5 rounded-full overflow-hidden">
-              <div className="bg-[#737688] h-full rounded-full" style={{ width: '12%' }}></div>
-            </div>
-          </div>
-        </div>
+        )}
       </div>
 
       {/* Recent Activity / Feed */}

@@ -9,7 +9,6 @@ import {
   AlertCircle, 
   CreditCard, 
   Building2, 
-  Zap, 
   Calendar,
   DollarSign,
   Filter,
@@ -85,7 +84,7 @@ export const BudgetScreen: React.FC = () => {
       amount: amount || 10,
       currency,
       frequency,
-      dueDay: dueDay || 1,
+      dueDay: dueDay || 15,
       accountId
     });
     setNewExpenseModal(false);
@@ -103,14 +102,9 @@ export const BudgetScreen: React.FC = () => {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
-          <div className="flex items-center gap-2">
-            <h1 className="font-display font-bold text-2xl md:text-3xl text-[#131b2e] tracking-tight">
-              Presupuesto de Gastos Recurrentes
-            </h1>
-            <span className="text-xs px-2.5 py-0.5 rounded-full bg-[#eaedff] text-[#0041c8] font-bold">
-              Control Fijo Mensual
-            </span>
-          </div>
+          <h1 className="font-display font-bold text-2xl md:text-3xl text-[#131b2e] tracking-tight">
+            Gastos Recurrentes
+          </h1>
           <p className="text-xs md:text-sm text-[#434656] mt-0.5">
             Planifica y programa tus compromisos fijos: alquileres, servicios, nóminas, licencias y condominios
           </p>
@@ -283,7 +277,7 @@ export const BudgetScreen: React.FC = () => {
                   <button
                     onClick={() => {
                       setPayModal(exp);
-                      setSelectedPayAccount(exp.accountId || accounts[0].id);
+                      setSelectedPayAccount(exp.accountId || accounts[0]?.id || '');
                     }}
                     className="px-4 py-2 bg-[#0041c8] hover:bg-[#0036a8] text-white rounded-xl text-xs font-display font-bold shadow-xs transition-colors"
                   >
@@ -298,8 +292,8 @@ export const BudgetScreen: React.FC = () => {
 
       {/* Modal: New Recurring Expense */}
       {newExpenseModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#131b2e]/60 backdrop-blur-xs">
-          <div className="w-full max-w-lg bg-white rounded-3xl p-6 border border-[#eaedff] shadow-2xl space-y-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#131b2e]/60 backdrop-blur-xs" onClick={() => setNewExpenseModal(false)}>
+          <div className="w-full max-w-lg bg-white rounded-3xl p-6 border border-[#eaedff] shadow-2xl space-y-4 max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between border-b border-[#eaedff] pb-3">
               <h3 className="font-display font-bold text-lg text-[#131b2e]">Nuevo Gasto Recurrente</h3>
               <button onClick={() => setNewExpenseModal(false)} className="p-1 rounded-full hover:bg-[#f2f3ff]">
@@ -355,7 +349,7 @@ export const BudgetScreen: React.FC = () => {
                     type="number"
                     min="1"
                     step="any"
-                    value={amount}
+                    value={amount || ''}
                     onChange={(e) => setAmount(parseFloat(e.target.value) || 0)}
                     className="w-full px-3 py-2 bg-[#f2f3ff] rounded-xl text-xs sm:text-sm font-bold outline-none border border-transparent focus:border-[#0041c8] focus:bg-white"
                   />
@@ -381,8 +375,8 @@ export const BudgetScreen: React.FC = () => {
                     type="number"
                     min="1"
                     max="31"
-                    value={dueDay}
-                    onChange={(e) => setDueDay(parseInt(e.target.value) || 1)}
+                    value={dueDay || ''}
+                    onChange={(e) => setDueDay(parseInt(e.target.value) || 0)}
                     className="w-full px-3 py-2 bg-[#f2f3ff] rounded-xl text-xs sm:text-sm font-semibold outline-none border border-transparent focus:border-[#0041c8] focus:bg-white"
                   />
                 </div>
@@ -438,8 +432,8 @@ export const BudgetScreen: React.FC = () => {
 
       {/* Modal: Pay Recurring Expense */}
       {payModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#131b2e]/60 backdrop-blur-xs">
-          <div className="w-full max-w-md bg-white rounded-3xl p-6 border border-[#eaedff] shadow-2xl space-y-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#131b2e]/60 backdrop-blur-xs" onClick={() => setPayModal(null)}>
+          <div className="w-full max-w-md bg-white rounded-3xl p-6 border border-[#eaedff] shadow-2xl space-y-4 max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between border-b border-[#eaedff] pb-3">
               <div>
                 <h3 className="font-display font-bold text-lg text-[#131b2e]">Pagar Gasto Recurrente</h3>

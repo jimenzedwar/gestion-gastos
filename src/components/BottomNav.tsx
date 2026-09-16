@@ -1,32 +1,45 @@
 import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
-import { 
-  Home, 
-  ReceiptText, 
-  Repeat, 
-  UserCircle, 
-  Plus, 
-  BarChart3, 
-  Users, 
-  CalendarClock, 
+import {
+  Home,
+  ReceiptText,
+  Repeat,
+  UserCircle,
+  Plus,
+  BarChart3,
+  Users,
+  CalendarClock,
+  CheckSquare,
   MoreHorizontal,
-  X,
-  ChevronRight
+  X
 } from 'lucide-react';
 
 export const BottomNav: React.FC = () => {
-  const { currentTab, setCurrentTab, setQuickExpenseModalOpen, employees, recurringExpenses } = useApp();
+  const { currentTab, setCurrentTab, setQuickExpenseModalOpen, employees, recurringExpenses, role, tasks, currentEmployee } = useApp();
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
 
   const pendingLoans = employees.flatMap((e) => e.loans.filter((l) => l.status === 'active')).length;
   const pendingExpenses = recurringExpenses.filter((e) => !e.isPaid).length;
+  const myPendingTasks = tasks.filter((t) => t.status !== 'completada' && (role === 'owner' || t.assignedEmployeeId === currentEmployee?.id)).length;
 
   const handleSelectTab = (tab: string) => {
     setCurrentTab(tab);
     setMoreMenuOpen(false);
   };
 
-  const isMoreActive = ['nomina', 'presupuesto', 'cambio', 'perfil'].includes(currentTab);
+  const moreItems = [
+    ...(role === 'owner'
+      ? [
+          { id: 'nomina', label: 'Nómina', sublabel: 'Sueldos y deducciones', icon: Users, color: 'bg-[#0041c8]', badge: pendingLoans > 0 ? pendingLoans : undefined },
+          { id: 'presupuesto', label: 'Gastos Recurrentes', sublabel: 'Pagos fijos mensuales', icon: CalendarClock, color: 'bg-[#006c49]', badge: pendingExpenses > 0 ? pendingExpenses : undefined }
+        ]
+      : []),
+    { id: 'cambio', label: 'Cambio de Divisas', sublabel: 'Tasa BCV o libre', icon: Repeat, color: 'bg-[#0041c8]' },
+    { id: 'tareas', label: 'Tareas', sublabel: role === 'owner' ? 'Asignar y revisar' : 'Tus tareas asignadas', icon: CheckSquare, color: 'bg-[#8b5cf6]', badge: myPendingTasks > 0 ? myPendingTasks : undefined },
+    ...(role === 'owner' ? [{ id: 'perfil', label: 'Cuentas', sublabel: 'Datos de Pago Móvil', icon: UserCircle, color: 'bg-[#434656]' }] : [])
+  ];
+
+  const isMoreActive = moreItems.some((item) => item.id === currentTab);
 
   return (
     <>
@@ -51,87 +64,36 @@ export const BottomNav: React.FC = () => {
             </div>
 
             <div className="grid grid-cols-2 gap-2.5">
-              <button
-                onClick={() => handleSelectTab('nomina')}
-                className={`p-3.5 rounded-2xl border text-left flex flex-col justify-between transition-all ${
-                  currentTab === 'nomina'
-                    ? 'border-[#0041c8] bg-[#eaedff]/60 text-[#0041c8]'
-                    : 'border-[#eaedff] bg-[#faf8ff] text-[#131b2e] hover:bg-[#f2f3ff]'
-                }`}
-              >
-                <div className="flex items-center justify-between mb-2">
-                  <div className="w-9 h-9 rounded-xl bg-[#0041c8] text-white flex items-center justify-center">
-                    <Users className="w-4 h-4" />
-                  </div>
-                  {pendingLoans > 0 && (
-                    <span className="px-1.5 py-0.5 rounded-full bg-[#f59e0b] text-white text-[10px] font-bold">
-                      {pendingLoans}
-                    </span>
-                  )}
-                </div>
-                <div>
-                  <div className="font-display font-bold text-xs">Nómina & Adelantos</div>
-                  <div className="text-[10px] text-[#737688]">Sueldos y deducciones</div>
-                </div>
-              </button>
-
-              <button
-                onClick={() => handleSelectTab('presupuesto')}
-                className={`p-3.5 rounded-2xl border text-left flex flex-col justify-between transition-all ${
-                  currentTab === 'presupuesto'
-                    ? 'border-[#0041c8] bg-[#eaedff]/60 text-[#0041c8]'
-                    : 'border-[#eaedff] bg-[#faf8ff] text-[#131b2e] hover:bg-[#f2f3ff]'
-                }`}
-              >
-                <div className="flex items-center justify-between mb-2">
-                  <div className="w-9 h-9 rounded-xl bg-[#006c49] text-white flex items-center justify-center">
-                    <CalendarClock className="w-4 h-4" />
-                  </div>
-                  {pendingExpenses > 0 && (
-                    <span className="px-1.5 py-0.5 rounded-full bg-[#b45309] text-white text-[10px] font-bold">
-                      {pendingExpenses}
-                    </span>
-                  )}
-                </div>
-                <div>
-                  <div className="font-display font-bold text-xs">Presupuesto Fijo</div>
-                  <div className="text-[10px] text-[#737688]">Gastos recurrentes</div>
-                </div>
-              </button>
-
-              <button
-                onClick={() => handleSelectTab('cambio')}
-                className={`p-3.5 rounded-2xl border text-left flex flex-col justify-between transition-all ${
-                  currentTab === 'cambio'
-                    ? 'border-[#0041c8] bg-[#eaedff]/60 text-[#0041c8]'
-                    : 'border-[#eaedff] bg-[#faf8ff] text-[#131b2e] hover:bg-[#f2f3ff]'
-                }`}
-              >
-                <div className="w-9 h-9 rounded-xl bg-[#0041c8] text-white flex items-center justify-center mb-2">
-                  <Repeat className="w-4 h-4" />
-                </div>
-                <div>
-                  <div className="font-display font-bold text-xs">Cambio USD/VES</div>
-                  <div className="text-[10px] text-[#737688]">Tasa BCV o libre</div>
-                </div>
-              </button>
-
-              <button
-                onClick={() => handleSelectTab('perfil')}
-                className={`p-3.5 rounded-2xl border text-left flex flex-col justify-between transition-all ${
-                  currentTab === 'perfil'
-                    ? 'border-[#0041c8] bg-[#eaedff]/60 text-[#0041c8]'
-                    : 'border-[#eaedff] bg-[#faf8ff] text-[#131b2e] hover:bg-[#f2f3ff]'
-                }`}
-              >
-                <div className="w-9 h-9 rounded-xl bg-[#434656] text-white flex items-center justify-center mb-2">
-                  <UserCircle className="w-4 h-4" />
-                </div>
-                <div>
-                  <div className="font-display font-bold text-xs">Perfil & Cuentas</div>
-                  <div className="text-[10px] text-[#737688]">Datos de Pago Móvil</div>
-                </div>
-              </button>
+              {moreItems.map((item) => {
+                const Icon = item.icon;
+                const isActive = currentTab === item.id;
+                return (
+                  <button
+                    key={item.id}
+                    onClick={() => handleSelectTab(item.id)}
+                    className={`p-3.5 rounded-2xl border text-left flex flex-col justify-between transition-all ${
+                      isActive
+                        ? 'border-[#0041c8] bg-[#eaedff]/60 text-[#0041c8]'
+                        : 'border-[#eaedff] bg-[#faf8ff] text-[#131b2e] hover:bg-[#f2f3ff]'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-2">
+                      <div className={`w-9 h-9 rounded-xl ${item.color} text-white flex items-center justify-center`}>
+                        <Icon className="w-4 h-4" />
+                      </div>
+                      {!!item.badge && (
+                        <span className="px-1.5 py-0.5 rounded-full bg-[#f59e0b] text-white text-[10px] font-bold">
+                          {item.badge}
+                        </span>
+                      )}
+                    </div>
+                    <div>
+                      <div className="font-display font-bold text-xs">{item.label}</div>
+                      <div className="text-[10px] text-[#737688]">{item.sublabel}</div>
+                    </div>
+                  </button>
+                );
+              })}
             </div>
           </div>
         </div>
@@ -189,13 +151,9 @@ export const BottomNav: React.FC = () => {
         >
           <MoreHorizontal className="w-5 h-5" />
           <span className="text-[10px] font-semibold tracking-tight">
-            {isMoreActive ? (
-              currentTab === 'nomina' ? 'Nómina' : currentTab === 'presupuesto' ? 'Presupuesto' : currentTab === 'cambio' ? 'Cambio' : 'Perfil'
-            ) : (
-              'Más'
-            )}
+            {isMoreActive ? moreItems.find((item) => item.id === currentTab)?.label ?? 'Más' : 'Más'}
           </span>
-          {(pendingLoans > 0 || pendingExpenses > 0) && (
+          {moreItems.some((item) => !!item.badge) && (
             <span className="w-2 h-2 rounded-full bg-[#f59e0b] absolute top-1 right-3"></span>
           )}
         </button>

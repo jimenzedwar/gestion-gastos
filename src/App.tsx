@@ -1,13 +1,13 @@
 import React from 'react';
 import { AppProvider, useApp } from './context/AppContext';
-import { Header } from './components/Header';
+import { AuthProvider, useAuth } from './context/AuthContext';
+import { LoginScreen } from './screens/LoginScreen';
 import { Sidebar } from './components/Sidebar';
 import { BottomNav } from './components/BottomNav';
 import { Toast } from './components/Toast';
 import { QuickExpenseModal } from './components/QuickExpenseModal';
 import { ExchangeModal } from './components/ExchangeModal';
 import { ReceiptTicketModal } from './components/ReceiptTicketModal';
-import { DeviceFrame } from './components/DeviceFrame';
 
 import { HomeScreen } from './screens/HomeScreen';
 import { MovementsScreen } from './screens/MovementsScreen';
@@ -16,9 +16,38 @@ import { PayrollScreen } from './screens/PayrollScreen';
 import { BudgetScreen } from './screens/BudgetScreen';
 import { ExchangeScreen } from './screens/ExchangeScreen';
 import { ProfileScreen } from './screens/ProfileScreen';
+import { TasksScreen } from './screens/TasksScreen';
 
 const MainLayout: React.FC = () => {
-  const { currentTab, deviceMode } = useApp();
+  const { currentTab, dataLoading, joinError } = useApp();
+  const { signOut } = useAuth();
+
+  if (dataLoading) {
+    return (
+      <div className="min-h-screen bg-[#faf8ff] flex items-center justify-center">
+        <div className="w-8 h-8 border-2 border-[#eaedff] border-t-[#0041c8] rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  if (joinError) {
+    return (
+      <div className="min-h-screen bg-[#faf8ff] flex items-center justify-center p-4">
+        <div className="w-full max-w-sm bg-white rounded-3xl border border-[#eaedff] shadow-2xl p-6 text-center space-y-3">
+          <div className="text-3xl">⚠️</div>
+          <h3 className="font-display font-bold text-base text-[#131b2e]">No se pudo vincular tu cuenta</h3>
+          <p className="text-xs text-[#737688]">{joinError}</p>
+          <p className="text-xs text-[#737688]">Contacta a quien te invitó para pedir un código nuevo.</p>
+          <button
+            onClick={signOut}
+            className="w-full py-2.5 px-4 bg-[#0041c8] text-white rounded-xl text-xs font-display font-bold"
+          >
+            Cerrar sesión
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   const renderScreen = () => {
     switch (currentTab) {
@@ -34,6 +63,8 @@ const MainLayout: React.FC = () => {
         return <BudgetScreen />;
       case 'cambio':
         return <ExchangeScreen />;
+      case 'tareas':
+        return <TasksScreen />;
       case 'perfil':
         return <ProfileScreen />;
       default:
@@ -41,40 +72,23 @@ const MainLayout: React.FC = () => {
     }
   };
 
-  if (deviceMode === 'mobile_frame') {
-    return (
-      <div className="min-h-screen bg-[#131b2e] flex flex-col">
-        <Header isMobileLayout={true} />
-        <div className="pt-16 flex-1 flex items-center justify-center p-2 sm:p-4">
-          <DeviceFrame>
-            {renderScreen()}
-          </DeviceFrame>
-        </div>
-        <Toast />
-        <QuickExpenseModal />
-        <ExchangeModal />
-        <ReceiptTicketModal />
-      </div>
-    );
-  }
-
   return (
-    <div className="min-h-screen bg-[#faf8ff] flex flex-col">
-      <Header />
-
-      <div className="pt-16 flex-1 flex">
-        {/* Desktop Sidebar (hidden on small viewports) */}
-        <div className="hidden md:block">
+    <div className="h-screen bg-[#faf8ff] flex flex-col overflow-hidden">
+      <div className="flex-1 flex min-h-0">
+        {/* Desktop Sidebar (hidden on small viewports) — stays fixed in place while content scrolls */}
+        <div className="hidden md:block shrink-0 h-full overflow-y-auto">
           <Sidebar />
         </div>
 
-        {/* Main Content Area */}
-        <main className="flex-1 max-w-7xl mx-auto w-full p-4 sm:p-6 lg:p-8 overflow-y-auto">
-          {renderScreen()}
+        {/* Main Content Area (this is the only part that scrolls) */}
+        <main className="flex-1 min-w-0 h-full overflow-y-auto">
+          <div className="max-w-7xl mx-auto w-full p-4 sm:p-6 lg:p-8">
+            {renderScreen()}
+          </div>
         </main>
       </div>
 
-      {/* Mobile Bottom Navigation (visible on mobile viewports only) */}
+      {/* Mobile Bottom Navigation (visible on mobile viewports only, fixed to the bottom) */}
       <div className="md:hidden">
         <BottomNav />
       </div>
@@ -88,10 +102,32 @@ const MainLayout: React.FC = () => {
   );
 };
 
-export default function App() {
+const AuthGate: React.FC = () => {
+  const { session, loading } = useAuth();
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-[#faf8ff] flex items-center justify-center">
+        <div className="w-8 h-8 border-2 border-[#eaedff] border-t-[#0041c8] rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  if (!session) {
+    return <LoginScreen />;
+  }
+
   return (
     <AppProvider>
       <MainLayout />
     </AppProvider>
+  );
+};
+
+export default function App() {
+  return (
+    <AuthProvider>
+      <AuthGate />
+    </AuthProvider>
   );
 }
