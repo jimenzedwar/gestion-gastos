@@ -2,8 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import { 
   ArrowDownUp, 
-  Clock, 
-  ShieldCheck, 
+  ShieldCheck,
   CheckCircle2, 
   ArrowRight, 
   RefreshCw,
@@ -17,7 +16,7 @@ import {
 export const ExchangeScreen: React.FC = () => {
   const {
     bcvRate,
-    accounts,
+    businessAccounts: accounts,
     performExchange,
     showToast,
     setSelectedTx,
@@ -32,14 +31,6 @@ export const ExchangeScreen: React.FC = () => {
 
   const [fromAccountId, setFromAccountId] = useState<string>('zinli-1');
   const [toAccountId, setToAccountId] = useState<string>('banesco-pm');
-  const [timeLeft, setTimeLeft] = useState<number>(899); // 14:59 timer
-
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setTimeLeft((prev) => (prev > 0 ? prev - 1 : 899));
-    }, 1000);
-    return () => clearInterval(timer);
-  }, []);
 
   // Update default accounts when direction toggles
   useEffect(() => {
@@ -84,10 +75,6 @@ export const ExchangeScreen: React.FC = () => {
   }
 
   const effectiveRate = isCustomRateActive ? customRate : bcvRate;
-
-  const minutes = Math.floor(timeLeft / 60);
-  const seconds = timeLeft % 60;
-  const timerDisplay = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
 
   const fromAccount = accounts.find((a) => a.id === fromAccountId) || accounts[0];
   const toAccount = accounts.find((a) => a.id === toAccountId) || accounts[1];
@@ -230,11 +217,6 @@ export const ExchangeScreen: React.FC = () => {
                   </>
                 )}
               </button>
-
-              <div className="flex items-center gap-1.5 px-2.5 py-1 bg-white rounded-full text-xs font-mono font-bold text-[#0041c8] shadow-xs shrink-0">
-                <Clock className="w-3 h-3 text-[#0041c8]" />
-                <span>{timerDisplay}</span>
-              </div>
             </div>
           </div>
 

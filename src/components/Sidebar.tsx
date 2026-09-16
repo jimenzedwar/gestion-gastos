@@ -7,6 +7,7 @@ import {
   UserCircle,
   BarChart3,
   Users,
+  Wallet,
   CalendarClock,
   CheckSquare
 } from 'lucide-react';
@@ -25,6 +26,7 @@ export const Sidebar: React.FC = () => {
     ...(role === 'owner'
       ? [
           { id: 'nomina', label: 'Nómina', icon: Users, badge: pendingLoans > 0 ? `${pendingLoans}` : undefined },
+          { id: 'asignaciones', label: 'Asignaciones', icon: Wallet },
           { id: 'presupuesto', label: 'Gastos Recurrentes', icon: CalendarClock, badge: pendingExpenses > 0 ? `${pendingExpenses}` : undefined }
         ]
       : []),

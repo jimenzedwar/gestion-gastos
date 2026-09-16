@@ -30,8 +30,15 @@ import {
 const COLORS = ['#0041c8', '#006c49', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4', '#f97316'];
 
 export const ChartsScreen: React.FC = () => {
-  const { transactions, accounts, bcvRate, formatUSD, formatVES } = useApp();
+  const { transactions: allTransactions, businessAccounts: accounts, employeeAccountIds, bcvRate, formatUSD, formatVES } = useApp();
   const [timeRange, setTimeRange] = useState<'month' | 'quarter' | 'year'>('month');
+
+  // Gráficos globales del negocio — excluyen las cuentas/transacciones de
+  // empleados, que tienen su propia vista separada en Asignaciones.
+  const transactions = useMemo(
+    () => allTransactions.filter((tx) => !employeeAccountIds.has(tx.accountId)),
+    [allTransactions, employeeAccountIds]
+  );
 
   // Transactions within the selected time range
   const periodTransactions = useMemo(() => {

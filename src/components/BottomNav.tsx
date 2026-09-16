@@ -8,6 +8,7 @@ import {
   Plus,
   BarChart3,
   Users,
+  Wallet,
   CalendarClock,
   CheckSquare,
   MoreHorizontal,
@@ -31,6 +32,7 @@ export const BottomNav: React.FC = () => {
     ...(role === 'owner'
       ? [
           { id: 'nomina', label: 'Nómina', sublabel: 'Sueldos y deducciones', icon: Users, color: 'bg-[#0041c8]', badge: pendingLoans > 0 ? pendingLoans : undefined },
+          { id: 'asignaciones', label: 'Asignaciones', sublabel: 'Saldo por empleado', icon: Wallet, color: 'bg-[#f59e0b]' },
           { id: 'presupuesto', label: 'Gastos Recurrentes', sublabel: 'Pagos fijos mensuales', icon: CalendarClock, color: 'bg-[#006c49]', badge: pendingExpenses > 0 ? pendingExpenses : undefined }
         ]
       : []),

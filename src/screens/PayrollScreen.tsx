@@ -27,8 +27,10 @@ export const PayrollScreen: React.FC = () => {
     employees,
     payrollHistory,
     accounts,
+    businessAccounts,
     bcvRate,
     addEmployee,
+    provisionEmployeeAccounts,
     requestLoan,
     repayLoan,
     processPayrollPayment,
@@ -59,6 +61,7 @@ export const PayrollScreen: React.FC = () => {
   const [empFreq, setEmpFreq] = useState<'quincenal' | 'mensual'>('quincenal');
   const [empMethod, setEmpMethod] = useState<'pago_movil' | 'cash_usd' | 'zinli'>('pago_movil');
   const [empBank, setEmpBank] = useState('0134 - Banesco');
+  const [empNeedsAccount, setEmpNeedsAccount] = useState(false);
 
   // Form states: New Loan/Advance
   const [loanEmpId, setLoanEmpId] = useState<string>(employees[0]?.id || '');
@@ -66,19 +69,19 @@ export const PayrollScreen: React.FC = () => {
   const [loanAmount, setLoanAmount] = useState<number>(50);
   const [loanDeduction, setLoanDeduction] = useState<number>(25);
   const [loanDesc, setLoanDesc] = useState('');
-  const [loanSourceAccount, setLoanSourceAccount] = useState<string>(accounts[0]?.id || '');
+  const [loanSourceAccount, setLoanSourceAccount] = useState<string>(businessAccounts[0]?.id || '');
 
   // Form states: Repay Loan
   const [repayAmount, setRepayAmount] = useState<number>(0);
-  const [repayDestAccount, setRepayDestAccount] = useState<string>(accounts[0]?.id || '');
+  const [repayDestAccount, setRepayDestAccount] = useState<string>(businessAccounts[0]?.id || '');
 
   // Form states: Process Payroll
   const [payrollPeriod, setPayrollPeriod] = useState<string>('1ra Quincena Septiembre 2026');
-  const [payrollAccountId, setPayrollAccountId] = useState<string>(accounts[1]?.id || accounts[0]?.id || '');
+  const [payrollAccountId, setPayrollAccountId] = useState<string>(businessAccounts[1]?.id || businessAccounts[0]?.id || '');
   const [payrollRate, setPayrollRate] = useState<number>(bcvRate);
   const [isCustomRate, setIsCustomRate] = useState<boolean>(false);
   const [isMixedPayment, setIsMixedPayment] = useState<boolean>(false);
-  const [secondaryPayrollAccountId, setSecondaryPayrollAccountId] = useState<string>(accounts[0]?.id || '');
+  const [secondaryPayrollAccountId, setSecondaryPayrollAccountId] = useState<string>(businessAccounts[0]?.id || '');
   const [secondaryPayrollAmount, setSecondaryPayrollAmount] = useState<number>(0);
 
   // Summary KPIs
@@ -100,7 +103,7 @@ export const PayrollScreen: React.FC = () => {
       showToast('Por favor completa el nombre del empleado');
       return;
     }
-    addEmployee({
+    const newEmp = addEmployee({
       name: empName.trim(),
       position: empPosition.trim() || 'Colaborador General',
       monthlySalary: empSalary || 200,
@@ -109,9 +112,13 @@ export const PayrollScreen: React.FC = () => {
       pagoMovilBank: empMethod === 'pago_movil' ? empBank : undefined,
       status: 'active'
     });
+    if (empNeedsAccount) {
+      provisionEmployeeAccounts(newEmp.id, newEmp.name);
+    }
     setNewEmployeeModal(false);
     setEmpName('');
     setEmpPosition('');
+    setEmpNeedsAccount(false);
   };
 
   const handleCreateLoan = (e: React.FormEvent) => {
@@ -416,7 +423,7 @@ export const PayrollScreen: React.FC = () => {
                         setProcessPayModal(emp);
                         setIsMixedPayment(false);
                         setSecondaryPayrollAmount(0);
-                        setSecondaryPayrollAccountId(accounts.find((a) => a.id !== payrollAccountId)?.id || accounts[0]?.id || '');
+                        setSecondaryPayrollAccountId(businessAccounts.find((a) => a.id !== payrollAccountId)?.id || businessAccounts[0]?.id || '');
                       }}
                       className="px-4 py-2 bg-[#0041c8] hover:bg-[#0036a8] text-white rounded-xl text-xs font-display font-bold shadow-xs transition-colors"
                     >
@@ -652,6 +659,19 @@ export const PayrollScreen: React.FC = () => {
                 </div>
               </div>
 
+              <label className="flex items-start gap-2.5 p-3 bg-[#f2f3ff] rounded-xl cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={empNeedsAccount}
+                  onChange={(e) => setEmpNeedsAccount(e.target.checked)}
+                  className="mt-0.5 w-4 h-4 accent-[#0041c8]"
+                />
+                <span className="text-xs text-[#434656]">
+                  <span className="font-bold text-[#131b2e] block">¿Este empleado necesita una cuenta para gastos?</span>
+                  Se le crearán automáticamente una cuenta en USD y otra en VES, visibles en Asignaciones.
+                </span>
+              </label>
+
               <div className="pt-3 border-t border-[#eaedff] flex items-center justify-end gap-2">
                 <button
                   type="button"
@@ -784,7 +804,7 @@ export const PayrollScreen: React.FC = () => {
                   onChange={(e) => setLoanSourceAccount(e.target.value)}
                   className="w-full px-3 py-2 bg-[#f2f3ff] rounded-xl text-xs sm:text-sm font-semibold outline-none border border-transparent focus:border-[#0041c8]"
                 >
-                  {accounts.map((a) => (
+                  {businessAccounts.map((a) => (
                     <option key={a.id} value={a.id}>
                       {a.name} ({a.currency === 'USD' ? formatUSD(a.balance) : formatVES(a.balance)})
                     </option>
@@ -859,7 +879,7 @@ export const PayrollScreen: React.FC = () => {
                   onChange={(e) => setRepayDestAccount(e.target.value)}
                   className="w-full px-3 py-2 bg-[#f2f3ff] rounded-xl text-xs sm:text-sm font-semibold outline-none border border-transparent focus:border-[#0041c8]"
                 >
-                  {accounts.map((a) => (
+                  {businessAccounts.map((a) => (
                     <option key={a.id} value={a.id}>
                       {a.name}
                     </option>
@@ -996,7 +1016,7 @@ export const PayrollScreen: React.FC = () => {
                         onChange={(e) => setPayrollAccountId(e.target.value)}
                         className="w-full px-3 py-2 bg-[#f2f3ff] rounded-xl text-xs font-semibold outline-none border border-transparent focus:border-[#0041c8]"
                       >
-                        {accounts.map((a) => (
+                        {businessAccounts.map((a) => (
                           <option key={a.id} value={a.id}>
                             {a.name} ({a.currency === 'USD' ? formatUSD(a.balance) : formatVES(a.balance)})
                           </option>
@@ -1021,7 +1041,7 @@ export const PayrollScreen: React.FC = () => {
                             onChange={(e) => setSecondaryPayrollAccountId(e.target.value)}
                             className="w-full px-3 py-2 bg-white rounded-xl text-xs font-semibold outline-none border border-transparent focus:border-[#0041c8]"
                           >
-                            {accounts.filter((a) => a.id !== payrollAccountId).map((a) => (
+                            {businessAccounts.filter((a) => a.id !== payrollAccountId).map((a) => (
                               <option key={a.id} value={a.id}>
                                 {a.name} ({a.currency === 'USD' ? formatUSD(a.balance) : formatVES(a.balance)})
                               </option>

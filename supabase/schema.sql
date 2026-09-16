@@ -399,3 +399,22 @@ alter table public.employees alter column phone drop not null;
 -- cuenta (ej. una parte en efectivo USD y el resto en Bs. por pago móvil).
 alter table public.payroll_history add column if not exists secondary_account_id text references public.accounts(id);
 alter table public.payroll_history add column if not exists secondary_amount_usd numeric;
+
+-- ============================================================================
+-- Asignaciones: cuentas propias de empleado (USD + VES)
+-- ============================================================================
+
+-- assigned_account_id / exchange_counterpart_account_id pasan a representar
+-- las dos cuentas propias de un empleado (USD y VES) en vez de "principal" +
+-- "contraparte de cambio". Un empleado ahora puede registrar ingreso/egreso
+-- en cualquiera de las dos, no solo en la primera.
+drop policy if exists "employee inserts own account transactions" on public.transactions;
+create policy "employee inserts own account transactions" on public.transactions
+  for insert
+  with check (
+    user_id = (select user_id from public.current_employee())
+    and account_id in (
+      (select assigned_account_id from public.current_employee()),
+      (select exchange_counterpart_account_id from public.current_employee())
+    )
+  );

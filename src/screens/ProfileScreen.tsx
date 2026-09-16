@@ -29,7 +29,7 @@ const iconForAccount = (acc: Account) => {
 
 export const ProfileScreen: React.FC = () => {
   const {
-    accounts,
+    businessAccounts: accounts,
     bcvRate,
     addAccount,
     showToast,

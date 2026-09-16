@@ -17,6 +17,7 @@ import { BudgetScreen } from './screens/BudgetScreen';
 import { ExchangeScreen } from './screens/ExchangeScreen';
 import { ProfileScreen } from './screens/ProfileScreen';
 import { TasksScreen } from './screens/TasksScreen';
+import { AssignmentsScreen } from './screens/AssignmentsScreen';
 
 const MainLayout: React.FC = () => {
   const { currentTab, dataLoading, joinError } = useApp();
@@ -59,6 +60,8 @@ const MainLayout: React.FC = () => {
         return <ChartsScreen />;
       case 'nomina':
         return <PayrollScreen />;
+      case 'asignaciones':
+        return <AssignmentsScreen />;
       case 'presupuesto':
         return <BudgetScreen />;
       case 'cambio':

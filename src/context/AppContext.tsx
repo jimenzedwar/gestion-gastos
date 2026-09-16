@@ -37,6 +37,8 @@ interface AppContextType {
   toggleHideBalances: () => void;
   dataLoading: boolean;
   accounts: Account[];
+  businessAccounts: Account[];
+  employeeAccountIds: Set<string>;
   transactions: Transaction[];
   addAccount: (account: Omit<Account, 'id'>) => Account;
 
@@ -59,6 +61,8 @@ interface AppContextType {
     split?: { secondaryAccountId: string; secondaryAmountUSD: number }
   ) => PayrollPayment | null;
   grantEmployeeAccess: (employeeId: string, assignedAccountId: string, exchangeCounterpartAccountId?: string) => Promise<string | null>;
+  provisionEmployeeAccounts: (employeeId: string, employeeName: string) => Promise<void>;
+  assignFundsToEmployee: (employeeId: string, sourceAccountId: string, amountUSD: number, currency: Currency) => void;
 
   // Tasks
   tasks: Task[];
@@ -75,8 +79,11 @@ interface AppContextType {
   setQuickExpenseModalOpen: (open: boolean) => void;
   quickTransactionType: 'income' | 'expense';
   openQuickIncome: () => void;
+  accountScope: string[] | null;
+  openQuickExpenseForAccount: (accountIds: string | string[]) => void;
   exchangeModalOpen: boolean;
   setExchangeModalOpen: (open: boolean) => void;
+  openExchangeForAccounts: (fromAccountId: string, toAccountId: string) => void;
   selectedTx: Transaction | null;
   setSelectedTx: (tx: Transaction | null) => void;
   receiptModalOpen: boolean;
@@ -140,21 +147,46 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // Modals
   const [quickExpenseModalOpen, setQuickExpenseModalOpenRaw] = useState<boolean>(false);
   const [quickTransactionType, setQuickTransactionType] = useState<'income' | 'expense'>('expense');
-  const [exchangeModalOpen, setExchangeModalOpen] = useState<boolean>(false);
+  const [exchangeModalOpen, setExchangeModalOpenRaw] = useState<boolean>(false);
   const [selectedTx, setSelectedTx] = useState<Transaction | null>(null);
   const [receiptModalOpen, setReceiptModalOpen] = useState<boolean>(false);
+
+  // Restricts the account picker in the quick expense/exchange modals to a
+  // specific set of ids (used by Asignaciones to act on a single employee's
+  // accounts). null = normal, unrestricted flow.
+  const [accountScope, setAccountScope] = useState<string[] | null>(null);
 
   // All the existing "anotar gasto" triggers just call this with true — keep
   // them working unchanged by always resetting to expense mode here, and add
   // a separate income entry point below.
   const setQuickExpenseModalOpen = (open: boolean) => {
-    if (open) setQuickTransactionType('expense');
+    if (open) {
+      setQuickTransactionType('expense');
+      setAccountScope(null);
+    }
     setQuickExpenseModalOpenRaw(open);
   };
 
   const openQuickIncome = () => {
     setQuickTransactionType('income');
+    setAccountScope(null);
     setQuickExpenseModalOpenRaw(true);
+  };
+
+  const openQuickExpenseForAccount = (accountIds: string | string[]) => {
+    setQuickTransactionType('expense');
+    setAccountScope(Array.isArray(accountIds) ? accountIds : [accountIds]);
+    setQuickExpenseModalOpenRaw(true);
+  };
+
+  const setExchangeModalOpen = (open: boolean) => {
+    if (open) setAccountScope(null);
+    setExchangeModalOpenRaw(open);
+  };
+
+  const openExchangeForAccounts = (fromAccountId: string, toAccountId: string) => {
+    setAccountScope([fromAccountId, toAccountId]);
+    setExchangeModalOpenRaw(true);
   };
 
   // Toast
@@ -292,13 +324,29 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
   }, []);
 
+  // Cuentas propias de empleados (Asignaciones) — separadas del panorama
+  // global del negocio (Cuentas, Inicio, Gráficos).
+  const employeeAccountIds = useMemo(() => {
+    const ids = new Set<string>();
+    employees.forEach((e) => {
+      if (e.assignedAccountId) ids.add(e.assignedAccountId);
+      if (e.exchangeCounterpartAccountId) ids.add(e.exchangeCounterpartAccountId);
+    });
+    return ids;
+  }, [employees]);
+
+  const businessAccounts = useMemo(
+    () => accounts.filter((a) => !employeeAccountIds.has(a.id)),
+    [accounts, employeeAccountIds]
+  );
+
   // Calculations
   const totalBalanceUSD = useMemo(() => {
-    return accounts.reduce((acc, a) => {
+    return businessAccounts.reduce((acc, a) => {
       if (a.currency === 'USD') return acc + a.balance;
       return acc + (a.balance / bcvRate);
     }, 0);
-  }, [accounts, bcvRate]);
+  }, [businessAccounts, bcvRate]);
 
   const totalBalanceVES = useMemo(() => {
     return totalBalanceUSD * bcvRate;
@@ -494,6 +542,102 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     showToast('Código de invitación generado');
     return code;
+  };
+
+  // Owner-only: creates a USD + VES wallet for an employee and links them as
+  // their two working accounts — separate from granting an app login.
+  const provisionEmployeeAccounts = async (employeeId: string, employeeName: string): Promise<void> => {
+    const usdAccount = addAccount({
+      name: `${employeeName} · USD`,
+      type: 'usd_wallet',
+      currency: 'USD',
+      balance: 0,
+      icon: 'wallet'
+    });
+    const vesAccount = addAccount({
+      name: `${employeeName} · VES`,
+      type: 'ves_bank',
+      currency: 'VES',
+      balance: 0,
+      icon: 'wallet'
+    });
+
+    setEmployees((prev) =>
+      prev.map((e) =>
+        e.id === employeeId
+          ? { ...e, assignedAccountId: usdAccount.id, exchangeCounterpartAccountId: vesAccount.id }
+          : e
+      )
+    );
+
+    const { error } = await supabase
+      .from('employees')
+      .update({
+        assigned_account_id: usdAccount.id,
+        exchange_counterpart_account_id: vesAccount.id
+      })
+      .eq('id', employeeId);
+
+    if (error) showToast('No se pudo vincular la cuenta al empleado');
+  };
+
+  // Owner-only: moves money from a business account into an employee's own
+  // account, recorded as a real expense (business) + income (employee) pair.
+  const assignFundsToEmployee = (
+    employeeId: string,
+    sourceAccountId: string,
+    amountUSD: number,
+    currency: Currency
+  ) => {
+    const emp = employees.find((e) => e.id === employeeId);
+    const sourceAcc = accounts.find((a) => a.id === sourceAccountId);
+    // Match by currency, not by field name — an employee's two accounts can be
+    // linked in either order depending on how they were assigned.
+    const empAccounts = [emp?.assignedAccountId, emp?.exchangeCounterpartAccountId]
+      .map((id) => accounts.find((a) => a.id === id))
+      .filter((a): a is Account => !!a);
+    const destAcc = empAccounts.find((a) => a.currency === currency);
+
+    if (!emp || !sourceAcc || !destAcc || amountUSD <= 0) {
+      showToast('No se pudo asignar el monto');
+      return;
+    }
+
+    const isSourceUSD = sourceAcc.currency === 'USD';
+    const chargeAmount = isSourceUSD ? amountUSD : amountUSD * bcvRate;
+    const destAmount = currency === 'USD' ? amountUSD : amountUSD * bcvRate;
+
+    addTransaction({
+      title: `Asignación a ${emp.name}`,
+      category: 'Asignación a empleado',
+      categoryEmoji: '👤',
+      accountId: sourceAcc.id,
+      accountName: sourceAcc.name,
+      type: 'expense',
+      currency: sourceAcc.currency,
+      amount: -chargeAmount,
+      secondaryAmount: isSourceUSD ? -(amountUSD * bcvRate) : -amountUSD,
+      rate: bcvRate,
+      icon: 'wallet',
+      note: `Fondos asignados a ${emp.name}`
+    });
+
+    addTransaction({
+      title: `Asignación recibida`,
+      category: 'Asignación recibida',
+      categoryEmoji: '👤',
+      accountId: destAcc.id,
+      accountName: destAcc.name,
+      type: 'income',
+      currency: destAcc.currency,
+      amount: destAmount,
+      secondaryAmount: currency === 'USD' ? amountUSD * bcvRate : amountUSD,
+      rate: bcvRate,
+      icon: 'wallet',
+      note: `Fondos recibidos de la empresa`
+    });
+
+    showToast(`$${amountUSD.toFixed(2)} asignados a ${emp.name}`);
   };
 
   const requestLoan = (
@@ -952,6 +1096,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         toggleHideBalances,
         dataLoading,
         accounts,
+        businessAccounts,
+        employeeAccountIds,
         transactions,
         addAccount,
         role,
@@ -964,6 +1110,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         repayLoan,
         processPayrollPayment,
         grantEmployeeAccess,
+        provisionEmployeeAccounts,
+        assignFundsToEmployee,
         tasks,
         addTask,
         updateTaskStatus,
@@ -974,8 +1122,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setQuickExpenseModalOpen,
         quickTransactionType,
         openQuickIncome,
+        accountScope,
+        openQuickExpenseForAccount,
         exchangeModalOpen,
         setExchangeModalOpen,
+        openExchangeForAccounts,
         selectedTx,
         setSelectedTx,
         receiptModalOpen,

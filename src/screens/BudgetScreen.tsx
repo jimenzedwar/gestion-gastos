@@ -17,10 +17,10 @@ import {
 } from 'lucide-react';
 
 export const BudgetScreen: React.FC = () => {
-  const { 
-    recurringExpenses, 
-    accounts, 
-    bcvRate, 
+  const {
+    recurringExpenses,
+    businessAccounts: accounts,
+    bcvRate,
     payRecurringExpense, 
     addRecurringExpense, 
     showToast,

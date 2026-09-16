@@ -1,15 +1,16 @@
 import React, { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
-import { 
-  X, 
-  ArrowDownUp, 
-  Clock, 
-  ShieldCheck, 
-  CheckCircle2, 
+import {
+  X,
+  ArrowDownUp,
+  ShieldCheck,
+  CheckCircle2,
   ArrowRight,
   Sliders,
   RotateCcw,
-  Lock
+  Lock,
+  Camera,
+  Trash2
 } from 'lucide-react';
 
 export const ExchangeModal: React.FC = () => {
@@ -18,12 +19,20 @@ export const ExchangeModal: React.FC = () => {
     setExchangeModalOpen,
     bcvRate,
     accounts,
+    businessAccounts,
+    employeeAccountIds,
+    accountScope,
     performExchange,
+    attachReceipt,
     showToast,
     setSelectedTx,
     formatUSD,
     formatVES
   } = useApp();
+
+  const availableAccounts = accountScope
+    ? accounts.filter((a) => accountScope.includes(a.id))
+    : businessAccounts;
 
   const [direction, setDirection] = useState<'usd_to_ves' | 'ves_to_usd'>('usd_to_ves');
   const [inputAmount, setInputAmount] = useState<number>(50);
@@ -32,36 +41,31 @@ export const ExchangeModal: React.FC = () => {
 
   const [fromAccountId, setFromAccountId] = useState<string>('zinli-1');
   const [toAccountId, setToAccountId] = useState<string>('banesco-pm');
-  const [timeLeft, setTimeLeft] = useState<number>(899); // 14:59 in seconds
-
-  useEffect(() => {
-    if (!exchangeModalOpen) return;
-    const timer = setInterval(() => {
-      setTimeLeft((prev) => (prev > 0 ? prev - 1 : 899));
-    }, 1000);
-    return () => clearInterval(timer);
-  }, [exchangeModalOpen]);
+  const [receiptFile, setReceiptFile] = useState<File | null>(null);
+  const [receiptPreview, setReceiptPreview] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (direction === 'usd_to_ves') {
-      const usdAcc = accounts.find((a) => a.currency === 'USD');
-      const vesAcc = accounts.find((a) => a.currency === 'VES');
+      const usdAcc = availableAccounts.find((a) => a.currency === 'USD');
+      const vesAcc = availableAccounts.find((a) => a.currency === 'VES');
       if (usdAcc) setFromAccountId(usdAcc.id);
       if (vesAcc) setToAccountId(vesAcc.id);
       setInputAmount(50);
     } else {
-      const vesAcc = accounts.find((a) => a.currency === 'VES');
-      const usdAcc = accounts.find((a) => a.currency === 'USD');
+      const vesAcc = availableAccounts.find((a) => a.currency === 'VES');
+      const usdAcc = availableAccounts.find((a) => a.currency === 'USD');
       if (vesAcc) setFromAccountId(vesAcc.id);
       if (usdAcc) setToAccountId(usdAcc.id);
       setInputAmount(7500);
     }
-  }, [direction, accounts]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [direction, accountScope, exchangeModalOpen]);
 
   if (!exchangeModalOpen) return null;
 
-  const hasUsdAccount = accounts.some((a) => a.currency === 'USD');
-  const hasVesAccount = accounts.some((a) => a.currency === 'VES');
+  const hasUsdAccount = availableAccounts.some((a) => a.currency === 'USD');
+  const hasVesAccount = availableAccounts.some((a) => a.currency === 'VES');
 
   if (!hasUsdAccount || !hasVesAccount) {
     return (
@@ -89,18 +93,16 @@ export const ExchangeModal: React.FC = () => {
   const effectiveRate = isCustomRateActive ? customRate : bcvRate;
   const isVesToUsd = direction === 'ves_to_usd';
 
-  const minutes = Math.floor(timeLeft / 60);
-  const seconds = timeLeft % 60;
-  const timerDisplay = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
-
-  const fromAccount = accounts.find((a) => a.id === fromAccountId) || accounts[0];
-  const toAccount = accounts.find((a) => a.id === toAccountId) || accounts[1];
+  const fromAccount = availableAccounts.find((a) => a.id === fromAccountId) || availableAccounts[0];
+  const toAccount = availableAccounts.find((a) => a.id === toAccountId) || availableAccounts[1];
 
   const calculatedOutput = isVesToUsd
     ? (inputAmount > 0 && effectiveRate > 0 ? inputAmount / effectiveRate : 0)
     : inputAmount * effectiveRate;
 
   const insufficientBalance = inputAmount > fromAccount.balance;
+  const isEmployeeExchange = employeeAccountIds.has(fromAccount.id) || employeeAccountIds.has(toAccount.id);
+  const receiptMissing = isEmployeeExchange && !receiptFile;
 
   const handleQuickAdd = (add: number) => {
     setInputAmount((prev) => prev + add);
@@ -114,7 +116,20 @@ export const ExchangeModal: React.FC = () => {
     setDirection((prev) => (prev === 'usd_to_ves' ? 'ves_to_usd' : 'usd_to_ves'));
   };
 
-  const handleConfirm = () => {
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setReceiptFile(file);
+    setReceiptPreview(URL.createObjectURL(file));
+  };
+
+  const handleRemoveReceipt = () => {
+    if (receiptPreview) URL.revokeObjectURL(receiptPreview);
+    setReceiptFile(null);
+    setReceiptPreview(null);
+  };
+
+  const handleConfirm = async () => {
     if (inputAmount <= 0) {
       showToast('Ingresa un monto mayor a 0');
       return;
@@ -130,6 +145,12 @@ export const ExchangeModal: React.FC = () => {
       return;
     }
 
+    if (receiptMissing) {
+      showToast('Adjunta un comprobante para justificar este cambio');
+      return;
+    }
+
+    setSaving(true);
     const tx = performExchange(
       inputAmount,
       calculatedOutput,
@@ -138,6 +159,11 @@ export const ExchangeModal: React.FC = () => {
       effectiveRate,
       isVesToUsd
     );
+    if (receiptFile) {
+      await attachReceipt(tx.id, receiptFile);
+    }
+    setSaving(false);
+    handleRemoveReceipt();
     setExchangeModalOpen(false);
     setSelectedTx(tx);
     showToast(
@@ -165,10 +191,6 @@ export const ExchangeModal: React.FC = () => {
             </div>
             <div>
               <h2 className="font-display font-bold text-base sm:text-lg text-[#131b2e]">Cambiar Divisas</h2>
-              <div className="flex items-center gap-1.5 text-xs text-[#006c49] font-semibold">
-                <Clock className="w-3.5 h-3.5" />
-                <span>Tasa congelada por {timerDisplay}</span>
-              </div>
             </div>
           </div>
           <button
@@ -207,13 +229,6 @@ export const ExchangeModal: React.FC = () => {
         <div className="p-4 sm:p-5 space-y-3.5">
           {/* Rate config row */}
           <div className="p-3 bg-[#f2f3ff] rounded-xl border border-[#eaedff] flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
-            <div>
-              <span className="text-[#737688] font-semibold block">Tasa aplicada:</span>
-              <strong className="text-[#0041c8] font-bold">
-                1 USD = Bs. {effectiveRate.toFixed(2)} {isCustomRateActive ? '(Personalizada)' : '(BCV)'}
-              </strong>
-            </div>
-
             <div className="flex items-center gap-2">
               <button
                 type="button"
@@ -225,10 +240,14 @@ export const ExchangeModal: React.FC = () => {
                     setIsCustomRateActive(true);
                   }
                 }}
-                className="text-[11px] font-bold text-[#0041c8] hover:underline flex items-center gap-1"
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold shadow-xs transition-colors ${
+                  isCustomRateActive
+                    ? 'bg-[#fef3c7] text-[#92400e] hover:bg-[#fde68a] border border-[#fde68a]'
+                    : 'bg-white text-[#0041c8] border border-[#dce1ff] hover:bg-[#eaedff]'
+                }`}
               >
-                <Sliders className="w-3 h-3" />
-                <span>{isCustomRateActive ? 'Volver a BCV' : 'Tasa libre/otra'}</span>
+                <Sliders className="w-3.5 h-3.5" />
+                <span>{isCustomRateActive ? 'Usar Tasa BCV' : 'Modificar Tasa'}</span>
               </button>
               {isCustomRateActive && (
                 <input
@@ -239,6 +258,13 @@ export const ExchangeModal: React.FC = () => {
                   className="w-20 px-2 py-0.5 bg-white rounded border border-[#0041c8] text-xs font-bold font-mono"
                 />
               )}
+            </div>
+
+            <div className="text-right sm:text-left">
+              <span className="text-[#737688] font-semibold block">Tasa aplicada:</span>
+              <strong className="text-[#0041c8] font-bold">
+                1 USD = Bs. {effectiveRate.toFixed(2)} {isCustomRateActive ? '(Personalizada)' : '(BCV)'}
+              </strong>
             </div>
           </div>
 
@@ -339,6 +365,32 @@ export const ExchangeModal: React.FC = () => {
               Hacia: <strong className="text-[#131b2e]">{toAccount.name}</strong>
             </div>
           </div>
+
+          {isEmployeeExchange && (
+            <div>
+              <label className="block text-xs font-bold text-[#434656] mb-1.5">
+                Comprobante del cambio (obligatorio)
+              </label>
+              {receiptPreview ? (
+                <div className="relative">
+                  <img src={receiptPreview} alt="Comprobante" className="w-full max-h-40 object-cover rounded-xl border border-[#eaedff]" />
+                  <button
+                    type="button"
+                    onClick={handleRemoveReceipt}
+                    className="absolute top-2 right-2 w-7 h-7 rounded-full bg-[#131b2e]/70 text-white flex items-center justify-center"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              ) : (
+                <label className="flex items-center justify-center gap-2 w-full py-3 px-4 bg-white border border-dashed border-[#c3c5d9] rounded-xl text-xs font-semibold text-[#434656] cursor-pointer hover:border-[#0041c8] hover:text-[#0041c8] transition-colors">
+                  <Camera className="w-4 h-4" />
+                  <span>Tomar foto o elegir archivo</span>
+                  <input type="file" accept="image/*" capture="environment" onChange={handleFileChange} className="hidden" />
+                </label>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Confirm Footer */}
@@ -346,11 +398,19 @@ export const ExchangeModal: React.FC = () => {
           <button
             type="button"
             onClick={handleConfirm}
-            disabled={insufficientBalance || inputAmount <= 0}
+            disabled={insufficientBalance || inputAmount <= 0 || receiptMissing || saving}
             className="w-full py-3.5 px-4 bg-[#0041c8] hover:bg-[#0036a8] disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-xl font-display font-bold text-sm shadow-[0_4px_16px_rgba(0,65,200,0.25)] flex items-center justify-center gap-2 transition-all active:scale-[0.99]"
           >
-            <span>{insufficientBalance ? 'Saldo insuficiente' : 'Confirmar Operación'}</span>
-            <ArrowRight className="w-4 h-4" />
+            <span>
+              {saving
+                ? 'Guardando...'
+                : insufficientBalance
+                ? 'Saldo insuficiente'
+                : receiptMissing
+                ? 'Adjunta un comprobante'
+                : 'Confirmar Operación'}
+            </span>
+            {!saving && <ArrowRight className="w-4 h-4" />}
           </button>
         </div>
       </div>

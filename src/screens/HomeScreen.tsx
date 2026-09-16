@@ -25,8 +25,9 @@ export const HomeScreen: React.FC = () => {
     toggleHideBalances,
     bcvRate,
     eurRate,
-    accounts,
-    transactions,
+    businessAccounts: accounts,
+    transactions: allTransactions,
+    employeeAccountIds,
     setCurrentTab,
     setQuickExpenseModalOpen,
     openQuickIncome,
@@ -47,6 +48,14 @@ export const HomeScreen: React.FC = () => {
 
   const calcNum = parseFloat(calcUsd) || 0;
   const calcVes = calcNum * bcvRate;
+
+  // Home's global widgets (weekly delta, category breakdown) only reflect the
+  // business's own accounts — employee-linked movements have their own view
+  // in Asignaciones.
+  const transactions = useMemo(
+    () => allTransactions.filter((tx) => !tx.accountId || !employeeAccountIds.has(tx.accountId)),
+    [allTransactions, employeeAccountIds]
+  );
 
   const weeklyDeltaUSD = useMemo(() => {
     const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;

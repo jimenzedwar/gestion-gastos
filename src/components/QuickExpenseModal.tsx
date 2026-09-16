@@ -11,6 +11,9 @@ export const QuickExpenseModal: React.FC = () => {
     quickTransactionType,
     bcvRate,
     accounts,
+    businessAccounts,
+    employeeAccountIds,
+    accountScope,
     addTransaction,
     attachReceipt,
     showToast
@@ -18,12 +21,15 @@ export const QuickExpenseModal: React.FC = () => {
 
   const isIncome = quickTransactionType === 'income';
   const categories = isIncome ? INCOME_CATEGORIES : QUICK_CATEGORIES;
+  const availableAccounts = accountScope
+    ? accounts.filter((a) => accountScope.includes(a.id))
+    : businessAccounts;
 
   const [currency, setCurrency] = useState<Currency>('USD');
   const [amountStr, setAmountStr] = useState<string>('0');
   const [concept, setConcept] = useState<string>('');
   const [selectedCategory, setSelectedCategory] = useState<string>(categories[0].label);
-  const [selectedAccountId, setSelectedAccountId] = useState<string>(accounts[0]?.id || '');
+  const [selectedAccountId, setSelectedAccountId] = useState<string>(availableAccounts[0]?.id || '');
   const [receiptFile, setReceiptFile] = useState<File | null>(null);
   const [receiptPreview, setReceiptPreview] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -31,14 +37,18 @@ export const QuickExpenseModal: React.FC = () => {
   useEffect(() => {
     if (quickExpenseModalOpen) {
       setSelectedCategory((isIncome ? INCOME_CATEGORIES : QUICK_CATEGORIES)[0].label);
+      setSelectedAccountId(availableAccounts[0]?.id || '');
     }
-    // Reset the category whenever the modal opens or switches between income/expense
+    // Reset category & default account whenever the modal opens or its scope changes
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [quickExpenseModalOpen, isIncome]);
+  }, [quickExpenseModalOpen, isIncome, accountScope]);
 
   if (!quickExpenseModalOpen) return null;
 
-  if (accounts.length === 0) {
+  const isEmployeeAccount = employeeAccountIds.has(selectedAccountId);
+  const receiptMissing = !isIncome && isEmployeeAccount && !receiptFile;
+
+  if (availableAccounts.length === 0) {
     return (
       <div
         className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#131b2e]/60 backdrop-blur-sm"
@@ -99,6 +109,11 @@ export const QuickExpenseModal: React.FC = () => {
   const handleSave = async () => {
     if (currentAmount <= 0) {
       showToast('Ingresa un monto válido');
+      return;
+    }
+
+    if (receiptMissing) {
+      showToast('Adjunta un comprobante para justificar este gasto');
       return;
     }
 
@@ -213,12 +228,12 @@ export const QuickExpenseModal: React.FC = () => {
 
           {/* Concept input */}
           <div>
-            <label className="block text-xs font-bold text-[#434656] mb-1.5">Concepto / Comercio</label>
+            <label className="block text-xs font-bold text-[#434656] mb-1.5">{isIncome ? 'Concepto / Origen' : 'Concepto / Comercio'}</label>
             <input
               type="text"
               value={concept}
               onChange={(e) => setConcept(e.target.value)}
-              placeholder="Ej: Supermercado Gama, Cafecito, Taxi..."
+              placeholder={isIncome ? 'Ej: Pago de cliente, Reembolso, Préstamo...' : 'Ej: Supermercado Gama, Cafecito, Taxi...'}
               className="w-full bg-white px-3.5 py-2.5 rounded-xl border border-[#eaedff] focus:border-[#0055ff] focus:ring-2 focus:ring-[#0055ff]/15 outline-none text-sm font-medium text-[#131b2e]"
             />
           </div>
@@ -254,7 +269,7 @@ export const QuickExpenseModal: React.FC = () => {
               {isIncome ? 'Recibir en cuenta' : 'Pagar desde cuenta'}
             </label>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-              {accounts.slice(0, 3).map((acc) => {
+              {availableAccounts.slice(0, 3).map((acc) => {
                 const isSelected = selectedAccountId === acc.id;
                 return (
                   <button
@@ -290,7 +305,9 @@ export const QuickExpenseModal: React.FC = () => {
 
           {/* Receipt Upload */}
           <div>
-            <label className="block text-xs font-bold text-[#434656] mb-1.5">Comprobante / Factura (opcional)</label>
+            <label className="block text-xs font-bold text-[#434656] mb-1.5">
+              Comprobante / Factura {isEmployeeAccount && !isIncome ? '(obligatorio)' : '(opcional)'}
+            </label>
             {receiptPreview ? (
               <div className="relative">
                 <img src={receiptPreview} alt="Comprobante" className="w-full max-h-40 object-cover rounded-xl border border-[#eaedff]" />
@@ -333,12 +350,14 @@ export const QuickExpenseModal: React.FC = () => {
           <button
             type="button"
             onClick={handleSave}
-            disabled={saving}
-            className="w-full py-3.5 px-4 bg-[#0041c8] hover:bg-[#0036a8] disabled:opacity-60 text-white rounded-xl font-display font-bold text-sm shadow-[0_4px_16px_rgba(0,65,200,0.25)] flex items-center justify-center gap-2 transition-all active:scale-[0.99]"
+            disabled={saving || receiptMissing}
+            className="w-full py-3.5 px-4 bg-[#0041c8] hover:bg-[#0036a8] disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-xl font-display font-bold text-sm shadow-[0_4px_16px_rgba(0,65,200,0.25)] flex items-center justify-center gap-2 transition-all active:scale-[0.99]"
           >
             <span>
               {saving
                 ? 'Guardando...'
+                : receiptMissing
+                ? 'Adjunta un comprobante'
                 : `${isIncome ? 'Guardar Ingreso' : 'Guardar Gasto'} (${currency === 'USD' ? '$' : 'Bs.'} ${currentAmount.toLocaleString('es-VE', { minimumFractionDigits: 2 })})`}
             </span>
             {!saving && <ArrowRight className="w-4 h-4" />}

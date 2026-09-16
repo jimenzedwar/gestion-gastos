@@ -28,6 +28,7 @@ export const MovementsScreen: React.FC = () => {
     setSelectedTx,
     setReceiptModalOpen,
     setQuickExpenseModalOpen,
+    openQuickIncome,
     showToast,
     formatUSD,
     formatVES
@@ -138,11 +139,18 @@ export const MovementsScreen: React.FC = () => {
 
         <div className="flex flex-wrap items-center gap-2">
           <button
+            onClick={openQuickIncome}
+            className="flex items-center gap-1.5 px-3.5 py-2 bg-white text-[#006c49] border border-[#d5f2e5] rounded-xl text-xs font-display font-bold shadow-xs hover:bg-[#eafff5] transition-all active:scale-95"
+          >
+            <Plus className="w-4 h-4" />
+            <span>Ingreso</span>
+          </button>
+          <button
             onClick={() => setQuickExpenseModalOpen(true)}
             className="flex items-center gap-1.5 px-3.5 py-2 bg-[#0041c8] text-white rounded-xl text-xs font-display font-bold shadow-md hover:bg-[#0036a8] transition-all active:scale-95"
           >
             <Plus className="w-4 h-4" />
-            <span>Anotar Movimiento</span>
+            <span>Egreso</span>
           </button>
         </div>
       </div>
