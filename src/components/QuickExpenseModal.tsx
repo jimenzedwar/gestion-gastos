@@ -1,13 +1,14 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import { Currency } from '../types';
-import { QUICK_CATEGORIES } from '../data/mockData';
+import { QUICK_CATEGORIES, INCOME_CATEGORIES } from '../data/mockData';
 import { X, Delete, ArrowRight, CreditCard, Smartphone, Banknote, Camera, Trash2 } from 'lucide-react';
 
 export const QuickExpenseModal: React.FC = () => {
   const {
     quickExpenseModalOpen,
     setQuickExpenseModalOpen,
+    quickTransactionType,
     bcvRate,
     accounts,
     addTransaction,
@@ -15,14 +16,25 @@ export const QuickExpenseModal: React.FC = () => {
     showToast
   } = useApp();
 
+  const isIncome = quickTransactionType === 'income';
+  const categories = isIncome ? INCOME_CATEGORIES : QUICK_CATEGORIES;
+
   const [currency, setCurrency] = useState<Currency>('USD');
   const [amountStr, setAmountStr] = useState<string>('0');
   const [concept, setConcept] = useState<string>('');
-  const [selectedCategory, setSelectedCategory] = useState<string>(QUICK_CATEGORIES[0].label);
+  const [selectedCategory, setSelectedCategory] = useState<string>(categories[0].label);
   const [selectedAccountId, setSelectedAccountId] = useState<string>(accounts[0]?.id || '');
   const [receiptFile, setReceiptFile] = useState<File | null>(null);
   const [receiptPreview, setReceiptPreview] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (quickExpenseModalOpen) {
+      setSelectedCategory((isIncome ? INCOME_CATEGORIES : QUICK_CATEGORIES)[0].label);
+    }
+    // Reset the category whenever the modal opens or switches between income/expense
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [quickExpenseModalOpen, isIncome]);
 
   if (!quickExpenseModalOpen) return null;
 
@@ -36,7 +48,7 @@ export const QuickExpenseModal: React.FC = () => {
           <div className="text-3xl">🏦</div>
           <h3 className="font-display font-bold text-base text-[#131b2e]">Agrega una cuenta primero</h3>
           <p className="text-xs text-[#737688]">
-            Necesitas al menos una cuenta para poder registrar un gasto.
+            Necesitas al menos una cuenta para poder registrar {isIncome ? 'un ingreso' : 'un gasto'}.
           </p>
           <button
             onClick={() => setQuickExpenseModalOpen(false)}
@@ -91,10 +103,11 @@ export const QuickExpenseModal: React.FC = () => {
     }
 
     const account = accounts.find((a) => a.id === selectedAccountId) || accounts[0];
-    const catObj = QUICK_CATEGORIES.find((c) => c.label === selectedCategory) || QUICK_CATEGORIES[0];
+    const catObj = categories.find((c) => c.label === selectedCategory) || categories[0];
 
     const usdVal = currency === 'USD' ? currentAmount : currentAmount / bcvRate;
     const vesVal = currency === 'VES' ? currentAmount : currentAmount * bcvRate;
+    const sign = isIncome ? 1 : -1;
 
     setSaving(true);
     const newTx = addTransaction({
@@ -103,15 +116,15 @@ export const QuickExpenseModal: React.FC = () => {
       categoryEmoji: catObj.emoji,
       accountId: account.id,
       accountName: account.name,
-      type: 'expense',
+      type: isIncome ? 'income' : 'expense',
       currency: currency,
-      amount: currency === 'USD' ? -usdVal : -vesVal,
-      secondaryAmount: currency === 'USD' ? -vesVal : -usdVal,
+      amount: sign * (currency === 'USD' ? usdVal : vesVal),
+      secondaryAmount: sign * (currency === 'USD' ? vesVal : usdVal),
       rate: bcvRate,
       icon: 'receipt',
-      note: `Gasto rápido registrado con ${account.name}`,
+      note: isIncome ? `Ingreso rápido registrado en ${account.name}` : `Gasto rápido registrado con ${account.name}`,
       beneficiary: {
-        name: concept || 'Comercio Local',
+        name: concept || (isIncome ? 'Fuente de ingreso' : 'Comercio Local'),
         branch: 'Caracas, VE',
         bank: account.name,
       }
@@ -124,7 +137,7 @@ export const QuickExpenseModal: React.FC = () => {
     setSaving(false);
     setQuickExpenseModalOpen(false);
     handleRemoveReceipt();
-    showToast(`Gasto registrado: ${currency === 'USD' ? '$' : 'Bs. '} ${currentAmount.toLocaleString('es-VE')}`);
+    showToast(`${isIncome ? 'Ingreso registrado' : 'Gasto registrado'}: ${currency === 'USD' ? '$' : 'Bs. '} ${currentAmount.toLocaleString('es-VE')}`);
   };
 
   return (
@@ -140,7 +153,9 @@ export const QuickExpenseModal: React.FC = () => {
         {/* Modal Header */}
         <div className="p-5 pb-3 border-b border-[#eaedff] flex items-center justify-between">
           <div>
-            <h2 className="font-display font-bold text-lg text-[#131b2e]">Anotar Gasto Rápido</h2>
+            <h2 className="font-display font-bold text-lg text-[#131b2e]">
+              {isIncome ? 'Anotar Ingreso' : 'Anotar Gasto Rápido'}
+            </h2>
             <p className="text-xs text-[#737688]">Registro en 3 segundos</p>
           </div>
           <button
@@ -212,7 +227,7 @@ export const QuickExpenseModal: React.FC = () => {
           <div>
             <label className="block text-xs font-bold text-[#434656] mb-1.5">Categoría Rápida</label>
             <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
-              {QUICK_CATEGORIES.map((cat) => {
+              {categories.map((cat) => {
                 const isSelected = selectedCategory === cat.label;
                 return (
                   <button
@@ -235,7 +250,9 @@ export const QuickExpenseModal: React.FC = () => {
 
           {/* Account Selection */}
           <div>
-            <label className="block text-xs font-bold text-[#434656] mb-1.5">Pagar desde cuenta</label>
+            <label className="block text-xs font-bold text-[#434656] mb-1.5">
+              {isIncome ? 'Recibir en cuenta' : 'Pagar desde cuenta'}
+            </label>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
               {accounts.slice(0, 3).map((acc) => {
                 const isSelected = selectedAccountId === acc.id;
@@ -322,7 +339,7 @@ export const QuickExpenseModal: React.FC = () => {
             <span>
               {saving
                 ? 'Guardando...'
-                : `Guardar Gasto (${currency === 'USD' ? '$' : 'Bs.'} ${currentAmount.toLocaleString('es-VE', { minimumFractionDigits: 2 })})`}
+                : `${isIncome ? 'Guardar Ingreso' : 'Guardar Gasto'} (${currency === 'USD' ? '$' : 'Bs.'} ${currentAmount.toLocaleString('es-VE', { minimumFractionDigits: 2 })})`}
             </span>
             {!saving && <ArrowRight className="w-4 h-4" />}
           </button>

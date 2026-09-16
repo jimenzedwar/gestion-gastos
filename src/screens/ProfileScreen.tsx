@@ -13,13 +13,12 @@ import {
   Landmark
 } from 'lucide-react';
 
-type NewAccountKind = 'usd_wallet' | 'cash_usd' | 'ves_bank' | 'cash_ves';
+type NewAccountKind = 'usd_wallet' | 'cash_usd' | 'ves_bank';
 
 const KIND_OPTIONS: { value: NewAccountKind; label: string; currency: 'USD' | 'VES'; type: Account['type']; icon: string; color: string }[] = [
   { value: 'usd_wallet', label: 'Billetera / Tarjeta en USD', currency: 'USD', type: 'usd_wallet', icon: 'credit_card', color: '#0041c8' },
   { value: 'cash_usd', label: 'Efectivo en USD', currency: 'USD', type: 'cash_usd', icon: 'wallet', color: '#10b981' },
-  { value: 'ves_bank', label: 'Cuenta / Pago Móvil en VES', currency: 'VES', type: 'ves_bank', icon: 'smartphone', color: '#006c49' },
-  { value: 'cash_ves', label: 'Efectivo en VES', currency: 'VES', type: 'cash_ves', icon: 'payments', color: '#737688' }
+  { value: 'ves_bank', label: 'Cuenta / Pago Móvil en VES', currency: 'VES', type: 'ves_bank', icon: 'smartphone', color: '#006c49' }
 ];
 
 const iconForAccount = (acc: Account) => {

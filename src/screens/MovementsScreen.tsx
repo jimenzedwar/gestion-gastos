@@ -12,8 +12,6 @@ import {
   Copy, 
   Check, 
   Share2, 
-  AlertCircle,
-  Users,
   Building2,
   Calendar,
   CreditCard,
@@ -376,7 +374,10 @@ export const MovementsScreen: React.FC = () => {
                   </span>
                 </div>
                 <button
-                  onClick={() => setReceiptModalOpen(true)}
+                  onClick={() => {
+                    setSelectedTx(activeTx);
+                    setReceiptModalOpen(true);
+                  }}
                   className="text-xs font-bold text-[#0041c8] hover:underline flex items-center gap-1"
                 >
                   Ver Ticket <ArrowUpRight className="w-3.5 h-3.5" />
@@ -460,32 +461,17 @@ export const MovementsScreen: React.FC = () => {
               </div>
 
               {/* Quick Actions in Side Panel */}
-              <div className="space-y-2 pt-2">
+              <div className="pt-2">
                 <button
-                  onClick={() => setReceiptModalOpen(true)}
+                  onClick={() => {
+                    setSelectedTx(activeTx);
+                    setReceiptModalOpen(true);
+                  }}
                   className="w-full py-2.5 px-3 bg-[#0041c8] hover:bg-[#0036a8] text-white rounded-xl font-display font-bold text-xs flex items-center justify-center gap-2 shadow-sm transition-all"
                 >
                   <Receipt className="w-3.5 h-3.5" />
                   <span>Ver Comprobante Oficial</span>
                 </button>
-
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    onClick={() => showToast('Función para dividir gasto activada')}
-                    className="py-2 px-2 bg-[#f2f3ff] hover:bg-[#eaedff] text-[#131b2e] rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors"
-                  >
-                    <Users className="w-3.5 h-3.5 text-[#0041c8]" />
-                    <span>Dividir gasto</span>
-                  </button>
-
-                  <button
-                    onClick={() => showToast('Reporte enviado a soporte')}
-                    className="py-2 px-2 bg-[#f2f3ff] hover:bg-[#eaedff] text-[#a20030] rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors"
-                  >
-                    <AlertCircle className="w-3.5 h-3.5" />
-                    <span>Reportar</span>
-                  </button>
-                </div>
               </div>
             </div>
           ) : (

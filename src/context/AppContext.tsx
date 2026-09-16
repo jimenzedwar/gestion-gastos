@@ -73,6 +73,8 @@ interface AppContextType {
   // Modals
   quickExpenseModalOpen: boolean;
   setQuickExpenseModalOpen: (open: boolean) => void;
+  quickTransactionType: 'income' | 'expense';
+  openQuickIncome: () => void;
   exchangeModalOpen: boolean;
   setExchangeModalOpen: (open: boolean) => void;
   selectedTx: Transaction | null;
@@ -136,10 +138,24 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [recurringExpenses, setRecurringExpenses] = useState<RecurringExpense[]>([]);
 
   // Modals
-  const [quickExpenseModalOpen, setQuickExpenseModalOpen] = useState<boolean>(false);
+  const [quickExpenseModalOpen, setQuickExpenseModalOpenRaw] = useState<boolean>(false);
+  const [quickTransactionType, setQuickTransactionType] = useState<'income' | 'expense'>('expense');
   const [exchangeModalOpen, setExchangeModalOpen] = useState<boolean>(false);
   const [selectedTx, setSelectedTx] = useState<Transaction | null>(null);
   const [receiptModalOpen, setReceiptModalOpen] = useState<boolean>(false);
+
+  // All the existing "anotar gasto" triggers just call this with true — keep
+  // them working unchanged by always resetting to expense mode here, and add
+  // a separate income entry point below.
+  const setQuickExpenseModalOpen = (open: boolean) => {
+    if (open) setQuickTransactionType('expense');
+    setQuickExpenseModalOpenRaw(open);
+  };
+
+  const openQuickIncome = () => {
+    setQuickTransactionType('income');
+    setQuickExpenseModalOpenRaw(true);
+  };
 
   // Toast
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -956,6 +972,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         addRecurringExpense,
         quickExpenseModalOpen,
         setQuickExpenseModalOpen,
+        quickTransactionType,
+        openQuickIncome,
         exchangeModalOpen,
         setExchangeModalOpen,
         selectedTx,
