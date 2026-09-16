@@ -26,6 +26,13 @@ const BCV_EUR_ENDPOINT = 'https://ve.dolarapi.com/v1/euros/oficial';
 const RATE_REFRESH_MS = 30 * 60 * 1000; // 30 minutes
 const RECEIPTS_BUCKET = 'receipts';
 
+// Date.now() alone can collide when two records are created in the same
+// millisecond (e.g. provisioning both an employee's accounts back to back,
+// or a mixed payroll payment's two transactions) — that duplicate id then
+// gets silently rejected by the primary key on insert. A random suffix
+// makes every generated id unique regardless of timing.
+const genId = (prefix: string): string => `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
 interface AppContextType {
   currentTab: string;
   setCurrentTab: (tab: string) => void;
@@ -40,7 +47,7 @@ interface AppContextType {
   businessAccounts: Account[];
   employeeAccountIds: Set<string>;
   transactions: Transaction[];
-  addAccount: (account: Omit<Account, 'id'>) => Account;
+  addAccount: (account: Omit<Account, 'id'>) => Promise<Account>;
 
   // Role: business owner (full access) or an employee with an assigned account
   role: 'owner' | 'employee';
@@ -50,7 +57,7 @@ interface AppContextType {
   // Payroll & Loans
   employees: Employee[];
   payrollHistory: PayrollPayment[];
-  addEmployee: (emp: Omit<Employee, 'id' | 'loans'>) => Employee;
+  addEmployee: (emp: Omit<Employee, 'id' | 'loans'>) => Promise<Employee>;
   requestLoan: (employeeId: string, loanData: { type: 'advance' | 'loan'; description: string; totalAmount: number; deductionPerPayment: number; payFromAccountId?: string }) => void;
   repayLoan: (employeeId: string, loanId: string, amount: number, accountId?: string) => void;
   processPayrollPayment: (
@@ -61,8 +68,8 @@ interface AppContextType {
     split?: { secondaryAccountId: string; secondaryAmountUSD: number }
   ) => PayrollPayment | null;
   grantEmployeeAccess: (employeeId: string, assignedAccountId: string, exchangeCounterpartAccountId?: string) => Promise<string | null>;
-  provisionEmployeeAccounts: (employeeId: string, employeeName: string) => Promise<void>;
-  assignFundsToEmployee: (employeeId: string, sourceAccountId: string, amountUSD: number, currency: Currency) => void;
+  provisionEmployeeAccounts: (employeeId: string, employeeName: string) => Promise<{ usdAccountId: string; vesAccountId: string }>;
+  assignFundsToEmployee: (employeeId: string, sourceAccountId: string, amount: number) => void;
 
   // Tasks
   tasks: Task[];
@@ -370,17 +377,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return `Bs. ${formatted}`;
   };
 
-  const addAccount = (accountData: Omit<Account, 'id'>): Account => {
+  // Async and awaited so callers that link this account elsewhere right after
+  // (e.g. provisionEmployeeAccounts) can be sure the row exists in the cloud
+  // first — otherwise that follow-up update can fail on the foreign key, or
+  // silently outrun this insert.
+  const addAccount = async (accountData: Omit<Account, 'id'>): Promise<Account> => {
     const newAccount: Account = {
       ...accountData,
-      id: `acc-${Date.now()}`
+      id: genId('acc')
     };
     setAccounts((prev) => [...prev, newAccount]);
 
     if (user) {
-      supabase.from('accounts').insert(accountToDb(newAccount, ownerId || user.id)).then(({ error }) => {
-        if (error) syncError('cuenta nueva');
-      });
+      const { error } = await supabase.from('accounts').insert(accountToDb(newAccount, ownerId || user.id));
+      if (error) syncError('cuenta nueva');
     }
 
     showToast(`Cuenta "${newAccount.name}" agregada con éxito`);
@@ -391,7 +401,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const randomNum = Math.floor(1000000 + Math.random() * 9000000);
     const newTx: Transaction = {
       ...newTxData,
-      id: `tx-${Date.now()}`,
+      id: genId('tx'),
       date: 'Hoy, ' + new Date().toLocaleTimeString('es-VE', { hour: '2-digit', minute: '2-digit', hour12: true }),
       createdAt: new Date().toISOString(),
       groupDate: 'HOY',
@@ -470,18 +480,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   // Employee & Loan Actions
-  const addEmployee = (empData: Omit<Employee, 'id' | 'loans'>): Employee => {
+  // Async and awaited on purpose: provisionEmployeeAccounts (called right after
+  // this, when "needs account" is checked) links accounts by updating this same
+  // row — if that update ran before the insert below actually landed, it would
+  // silently match zero rows and the links would be lost on the next reload.
+  const addEmployee = async (empData: Omit<Employee, 'id' | 'loans'>): Promise<Employee> => {
     const newEmp: Employee = {
       ...empData,
-      id: `emp-${Date.now()}`,
+      id: genId('emp'),
       loans: []
     };
     setEmployees((prev) => [...prev, newEmp]);
 
     if (user) {
-      supabase.from('employees').insert(employeeToDb(newEmp, ownerId || user.id)).then(({ error }) => {
-        if (error) syncError('empleado');
-      });
+      const { error } = await supabase.from('employees').insert(employeeToDb(newEmp, ownerId || user.id));
+      if (error) syncError('empleado');
     }
 
     showToast(`Empleado ${newEmp.name} registrado con éxito`);
@@ -545,22 +558,29 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   // Owner-only: creates a USD + VES wallet for an employee and links them as
-  // their two working accounts — separate from granting an app login.
-  const provisionEmployeeAccounts = async (employeeId: string, employeeName: string): Promise<void> => {
-    const usdAccount = addAccount({
-      name: `${employeeName} · USD`,
-      type: 'usd_wallet',
-      currency: 'USD',
-      balance: 0,
-      icon: 'wallet'
-    });
-    const vesAccount = addAccount({
-      name: `${employeeName} · VES`,
-      type: 'ves_bank',
-      currency: 'VES',
-      balance: 0,
-      icon: 'wallet'
-    });
+  // their two working accounts — separate from granting an app login. Returns
+  // the new account ids so a caller can use them immediately (e.g. to grant
+  // access right after) without waiting on a state update to land.
+  const provisionEmployeeAccounts = async (
+    employeeId: string,
+    employeeName: string
+  ): Promise<{ usdAccountId: string; vesAccountId: string }> => {
+    const [usdAccount, vesAccount] = await Promise.all([
+      addAccount({
+        name: `${employeeName} · USD`,
+        type: 'usd_wallet',
+        currency: 'USD',
+        balance: 0,
+        icon: 'wallet'
+      }),
+      addAccount({
+        name: `${employeeName} · VES`,
+        type: 'ves_bank',
+        currency: 'VES',
+        balance: 0,
+        icon: 'wallet'
+      })
+    ]);
 
     setEmployees((prev) =>
       prev.map((e) =>
@@ -579,33 +599,58 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       .eq('id', employeeId);
 
     if (error) showToast('No se pudo vincular la cuenta al empleado');
+    return { usdAccountId: usdAccount.id, vesAccountId: vesAccount.id };
   };
 
   // Owner-only: moves money from a business account into an employee's own
   // account, recorded as a real expense (business) + income (employee) pair.
+  // The destination currency always follows the source account's own
+  // currency (USD account → their USD wallet, VES account → their VES
+  // wallet) — no separate currency picker, no conversion for the transfer
+  // itself, and the amount is typed in that same native currency.
   const assignFundsToEmployee = (
     employeeId: string,
     sourceAccountId: string,
-    amountUSD: number,
-    currency: Currency
+    amount: number
   ) => {
     const emp = employees.find((e) => e.id === employeeId);
     const sourceAcc = accounts.find((a) => a.id === sourceAccountId);
+
+    if (!emp) {
+      showToast('No se encontró al empleado');
+      return;
+    }
+    if (emp.assignedAccountId && emp.assignedAccountId === emp.exchangeCounterpartAccountId) {
+      showToast(`${emp.name} tiene sus dos cuentas mal vinculadas (apuntan al mismo id) — hay que corregirlo antes de poder asignar`);
+      return;
+    }
+    if (!sourceAcc) {
+      showToast('Selecciona una cuenta de origen válida');
+      return;
+    }
+    if (amount <= 0) {
+      showToast('Ingresa un monto válido');
+      return;
+    }
+
+    const currency = sourceAcc.currency;
     // Match by currency, not by field name — an employee's two accounts can be
     // linked in either order depending on how they were assigned.
-    const empAccounts = [emp?.assignedAccountId, emp?.exchangeCounterpartAccountId]
+    const empAccounts = [emp.assignedAccountId, emp.exchangeCounterpartAccountId]
       .map((id) => accounts.find((a) => a.id === id))
       .filter((a): a is Account => !!a);
     const destAcc = empAccounts.find((a) => a.currency === currency);
 
-    if (!emp || !sourceAcc || !destAcc || amountUSD <= 0) {
-      showToast('No se pudo asignar el monto');
+    if (!destAcc) {
+      showToast(`${emp.name} no tiene una cuenta en ${currency === 'USD' ? 'USD' : 'Bs.'}`);
+      return;
+    }
+    if (sourceAcc.id === destAcc.id) {
+      showToast('La cuenta de origen y destino no pueden ser la misma');
       return;
     }
 
-    const isSourceUSD = sourceAcc.currency === 'USD';
-    const chargeAmount = isSourceUSD ? amountUSD : amountUSD * bcvRate;
-    const destAmount = currency === 'USD' ? amountUSD : amountUSD * bcvRate;
+    const secondaryAmount = currency === 'USD' ? amount * bcvRate : amount / bcvRate;
 
     addTransaction({
       title: `Asignación a ${emp.name}`,
@@ -614,9 +659,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       accountId: sourceAcc.id,
       accountName: sourceAcc.name,
       type: 'expense',
-      currency: sourceAcc.currency,
-      amount: -chargeAmount,
-      secondaryAmount: isSourceUSD ? -(amountUSD * bcvRate) : -amountUSD,
+      currency,
+      amount: -amount,
+      secondaryAmount: -secondaryAmount,
       rate: bcvRate,
       icon: 'wallet',
       note: `Fondos asignados a ${emp.name}`
@@ -629,22 +674,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       accountId: destAcc.id,
       accountName: destAcc.name,
       type: 'income',
-      currency: destAcc.currency,
-      amount: destAmount,
-      secondaryAmount: currency === 'USD' ? amountUSD * bcvRate : amountUSD,
+      currency,
+      amount,
+      secondaryAmount,
       rate: bcvRate,
       icon: 'wallet',
       note: `Fondos recibidos de la empresa`
     });
 
-    showToast(`$${amountUSD.toFixed(2)} asignados a ${emp.name}`);
+    showToast(`${currency === 'USD' ? '$' : 'Bs.'}${amount.toFixed(2)} asignados a ${emp.name}`);
   };
 
   const requestLoan = (
     employeeId: string,
     loanData: { type: 'advance' | 'loan'; description: string; totalAmount: number; deductionPerPayment: number; payFromAccountId?: string }
   ) => {
-    const loanId = `loan-${Date.now()}`;
+    const loanId = genId('loan');
     const newLoan: EmployeeLoan = {
       id: loanId,
       employeeId,
@@ -792,6 +837,40 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const netUSD = Math.max(0, baseUSD - totalDeductionUSD);
     const netVES = netUSD * rate;
 
+    const sourceAcc = accounts.find((a) => a.id === accountId) || accounts[0];
+    const isSourceUSD = sourceAcc.currency === 'USD';
+
+    // Mixed payment: part of the net paid from a second account (e.g. cash USD + Bs.)
+    const secondaryAmountUSD = split ? Math.min(Math.max(split.secondaryAmountUSD, 0), netUSD) : 0;
+    const primaryAmountUSD = netUSD - secondaryAmountUSD;
+    const primaryChargeAmount = isSourceUSD ? primaryAmountUSD : primaryAmountUSD * rate;
+
+    // Validate balances BEFORE touching anything — never let a payment go
+    // through partially and never silently clamp a shortfall to zero.
+    if (primaryChargeAmount > sourceAcc.balance) {
+      showToast(
+        `Saldo insuficiente en ${sourceAcc.name}: tiene ${isSourceUSD ? formatUSD(sourceAcc.balance) : formatVES(sourceAcc.balance)} y se necesitan ${isSourceUSD ? formatUSD(primaryChargeAmount) : formatVES(primaryChargeAmount)}`
+      );
+      return null;
+    }
+
+    let secondaryAcc: Account | undefined;
+    if (split && secondaryAmountUSD > 0) {
+      secondaryAcc = accounts.find((a) => a.id === split.secondaryAccountId);
+      if (!secondaryAcc) {
+        showToast('Selecciona una segunda cuenta válida para el pago mixto');
+        return null;
+      }
+      const isSecondaryUSD = secondaryAcc.currency === 'USD';
+      const secondaryChargeAmount = isSecondaryUSD ? secondaryAmountUSD : secondaryAmountUSD * rate;
+      if (secondaryChargeAmount > secondaryAcc.balance) {
+        showToast(
+          `Saldo insuficiente en ${secondaryAcc.name}: tiene ${isSecondaryUSD ? formatUSD(secondaryAcc.balance) : formatVES(secondaryAcc.balance)} y se necesitan ${isSecondaryUSD ? formatUSD(secondaryChargeAmount) : formatVES(secondaryChargeAmount)}`
+        );
+        return null;
+      }
+    }
+
     // Update employee loans state
     setEmployees((prev) =>
       prev.map((e) => (e.id === employeeId ? { ...e, loans: updatedLoans } : e))
@@ -808,16 +887,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       });
     }
 
-    const sourceAcc = accounts.find((a) => a.id === accountId) || accounts[0];
-    const isSourceUSD = sourceAcc.currency === 'USD';
-
-    // Mixed payment: part of the net paid from a second account (e.g. cash USD + Bs.)
-    const secondaryAmountUSD = split ? Math.min(Math.max(split.secondaryAmountUSD, 0), netUSD) : 0;
-    const primaryAmountUSD = netUSD - secondaryAmountUSD;
-    const primaryChargeAmount = isSourceUSD ? primaryAmountUSD : primaryAmountUSD * rate;
-
     const paymentRecord: PayrollPayment = {
-      id: `pay-${Date.now()}`,
+      id: genId('pay'),
       employeeId: emp.id,
       employeeName: emp.name,
       period,
@@ -864,7 +935,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     // Record the second disbursement, if this was a mixed payment
     if (split && secondaryAmountUSD > 0) {
-      const secondaryAcc = accounts.find((a) => a.id === split.secondaryAccountId);
       if (secondaryAcc) {
         const isSecondaryUSD = secondaryAcc.currency === 'USD';
         const secondaryChargeAmount = isSecondaryUSD ? secondaryAmountUSD : secondaryAmountUSD * rate;
@@ -954,7 +1024,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const addRecurringExpense = (newExpenseData: Omit<RecurringExpense, 'id' | 'isPaid'>): RecurringExpense => {
     const newExp: RecurringExpense = {
       ...newExpenseData,
-      id: `rec-${Date.now()}`,
+      id: genId('rec'),
       isPaid: false
     };
     setRecurringExpenses((prev) => [...prev, newExp]);
@@ -972,7 +1042,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // Tasks
   const addTask = (taskData: { title: string; description?: string; priority: TaskPriority; assignedEmployeeId?: string; dueDate?: string }) => {
     const newTask: Task = {
-      id: `task-${Date.now()}`,
+      id: genId('task'),
       title: taskData.title,
       description: taskData.description,
       priority: taskData.priority,
@@ -1017,7 +1087,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const toAcc = accounts.find((a) => a.id === toAccountId) || accounts[1];
 
     const exchangeTx: Transaction = {
-      id: `swap-${Date.now()}`,
+      id: genId('swap'),
       title: isVesToUsd ? 'Cambio VES ➔ USD' : 'Cambio USD ➔ VES',
       category: 'Cambio',
       categoryEmoji: '🔄',

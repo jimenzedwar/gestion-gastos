@@ -20,6 +20,7 @@ import {
   Repeat,
   User,
   X,
+  Search,
   PieChart as PieIcon,
   BarChart3
 } from 'lucide-react';
@@ -42,10 +43,10 @@ export const AssignmentsScreen: React.FC = () => {
   } = useApp();
 
   const [selectedEmployeeId, setSelectedEmployeeId] = useState<string | null>(null);
-  const [assignModal, setAssignModal] = useState<{ employeeId: string; employeeName: string } | null>(null);
+  const [employeeSearch, setEmployeeSearch] = useState('');
+  const [assignModal, setAssignModal] = useState<{ employeeId: string; employeeName: string; hasUSD: boolean; hasVES: boolean } | null>(null);
   const [assignSourceId, setAssignSourceId] = useState<string>('');
   const [assignAmount, setAssignAmount] = useState<number>(0);
-  const [assignCurrency, setAssignCurrency] = useState<'USD' | 'VES'>('USD');
 
   const employeesWithAccounts = useMemo(
     () => employees.filter((e) => e.assignedAccountId && e.exchangeCounterpartAccountId),
@@ -114,14 +115,30 @@ export const AssignmentsScreen: React.FC = () => {
 
   const globalTotalSpent = globalCategoryBreakdown.reduce((sum, c) => sum + c.value, 0);
 
+  const filteredEmployeeStats = useMemo(() => {
+    const q = employeeSearch.trim().toLowerCase();
+    if (!q) return employeeStats;
+    return employeeStats.filter((s) => s.employee.name.toLowerCase().includes(q));
+  }, [employeeStats, employeeSearch]);
+
   const selected = employeeStats.find((s) => s.employee.id === selectedEmployeeId) || null;
 
   const handleOpenAssign = (employeeId: string, employeeName: string) => {
-    setAssignModal({ employeeId, employeeName });
-    setAssignSourceId(businessAccounts[0]?.id || '');
+    const stats = employeeStats.find((s) => s.employee.id === employeeId);
+    const hasUSD = !!stats?.usdAcc;
+    const hasVES = !!stats?.vesAcc;
+    setAssignModal({ employeeId, employeeName, hasUSD, hasVES });
+    // Only offer source accounts in a currency this employee can actually
+    // receive — the destination is always that same currency, never asked.
+    const validSources = businessAccounts.filter((a) => (a.currency === 'USD' && hasUSD) || (a.currency === 'VES' && hasVES));
+    setAssignSourceId(validSources[0]?.id || '');
     setAssignAmount(0);
-    setAssignCurrency('USD');
   };
+
+  const assignSourceOptions = assignModal
+    ? businessAccounts.filter((a) => (a.currency === 'USD' && assignModal.hasUSD) || (a.currency === 'VES' && assignModal.hasVES))
+    : [];
+  const assignSourceAccount = businessAccounts.find((a) => a.id === assignSourceId);
 
   const handleConfirmAssign = () => {
     if (!assignModal) return;
@@ -133,7 +150,7 @@ export const AssignmentsScreen: React.FC = () => {
       showToast('Ingresa un monto válido');
       return;
     }
-    assignFundsToEmployee(assignModal.employeeId, assignSourceId, assignAmount, assignCurrency);
+    assignFundsToEmployee(assignModal.employeeId, assignSourceId, assignAmount);
     setAssignModal(null);
   };
 
@@ -293,59 +310,6 @@ export const AssignmentsScreen: React.FC = () => {
         </p>
       </div>
 
-      {/* Per-employee cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-        {employeeStats.map((s) => (
-          <div
-            key={s.employee.id}
-            className="bg-white rounded-2xl border border-[#eaedff] p-4 shadow-[0_2px_10px_rgba(19,27,46,0.03)] space-y-3 cursor-pointer hover:border-[#0041c8]/40 transition-colors"
-            onClick={() => setSelectedEmployeeId(s.employee.id)}
-          >
-            <div className="flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2.5 min-w-0">
-                <div className="w-9 h-9 rounded-xl bg-[#eaedff] text-[#0041c8] flex items-center justify-center shrink-0">
-                  <User className="w-4 h-4" />
-                </div>
-                <div className="min-w-0">
-                  <div className="text-sm font-bold text-[#131b2e] truncate">{s.employee.name}</div>
-                  <div className="text-[11px] text-[#737688] truncate">{s.employee.position}</div>
-                </div>
-              </div>
-              <div className="text-right shrink-0">
-                <div className="font-display text-sm font-extrabold text-[#131b2e]">{formatUSD(s.totalUSD)}</div>
-                <div className="text-[10px] text-[#737688]">Equivalente total</div>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-2 text-xs">
-              <div className="p-2 rounded-xl bg-[#f2f3ff]">
-                <div className="text-[10px] text-[#737688] font-semibold">USD</div>
-                <div className="font-bold text-[#0041c8]">{formatUSD(s.usdAcc?.balance || 0)}</div>
-              </div>
-              <div className="p-2 rounded-xl bg-[#f2f3ff]">
-                <div className="text-[10px] text-[#737688] font-semibold">VES</div>
-                <div className="font-bold text-[#006c49]">{formatVES(s.vesAcc?.balance || 0)}</div>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
-              <button
-                onClick={() => handleOpenAssign(s.employee.id, s.employee.name)}
-                className="flex-1 flex items-center justify-center gap-1 py-1.5 px-2 bg-[#0041c8] text-white rounded-lg text-[11px] font-bold hover:bg-[#0036a8]"
-              >
-                <Plus className="w-3 h-3" /> Asignar
-              </button>
-              <button
-                onClick={() => openQuickExpenseForAccount([s.employee.assignedAccountId!, s.employee.exchangeCounterpartAccountId!])}
-                className="flex-1 flex items-center justify-center gap-1 py-1.5 px-2 bg-white border border-[#eaedff] text-[#434656] rounded-lg text-[11px] font-bold hover:bg-[#f2f3ff]"
-              >
-                <Receipt className="w-3 h-3" /> Gasto
-              </button>
-            </div>
-          </div>
-        ))}
-      </div>
-
       {/* Summary charts */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         <div className="lg:col-span-7 bg-white rounded-3xl border border-[#eaedff] p-5 sm:p-6 shadow-[0_4px_20px_rgba(19,27,46,0.03)]">
@@ -418,6 +382,81 @@ export const AssignmentsScreen: React.FC = () => {
         </div>
       </div>
 
+      {/* Employees table */}
+      <div className="bg-white rounded-3xl border border-[#eaedff] shadow-[0_4px_20px_rgba(19,27,46,0.03)] overflow-hidden">
+        <div className="p-4 sm:p-5 border-b border-[#eaedff] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <h3 className="font-display font-bold text-base text-[#131b2e]">Empleados con cuenta</h3>
+          <div className="relative w-full sm:w-64">
+            <Search className="w-3.5 h-3.5 text-[#737688] absolute left-3 top-1/2 -translate-y-1/2" />
+            <input
+              type="text"
+              value={employeeSearch}
+              onChange={(e) => setEmployeeSearch(e.target.value)}
+              placeholder="Buscar por nombre..."
+              className="w-full pl-8 pr-3 py-2 bg-[#f2f3ff] rounded-xl text-xs font-medium outline-none border border-transparent focus:border-[#0041c8] focus:bg-white"
+            />
+          </div>
+        </div>
+
+        {filteredEmployeeStats.length === 0 ? (
+          <p className="text-xs text-[#737688] py-10 text-center">Ningún empleado coincide con "{employeeSearch}".</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="text-left text-[10px] uppercase tracking-wide text-[#737688] border-b border-[#eaedff]">
+                  <th className="px-4 sm:px-5 py-2.5 font-semibold">Empleado</th>
+                  <th className="px-3 py-2.5 font-semibold text-right">USD</th>
+                  <th className="px-3 py-2.5 font-semibold text-right">VES</th>
+                  <th className="px-3 py-2.5 font-semibold text-right">Total</th>
+                  <th className="px-3 sm:px-5 py-2.5 font-semibold text-right">Acciones</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredEmployeeStats.map((s) => (
+                  <tr
+                    key={s.employee.id}
+                    className="border-b border-[#f2f3ff] last:border-0 hover:bg-[#faf8ff] cursor-pointer transition-colors"
+                    onClick={() => setSelectedEmployeeId(s.employee.id)}
+                  >
+                    <td className="px-4 sm:px-5 py-2.5">
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <div className="w-8 h-8 rounded-lg bg-[#eaedff] text-[#0041c8] flex items-center justify-center shrink-0">
+                          <User className="w-3.5 h-3.5" />
+                        </div>
+                        <div className="min-w-0">
+                          <div className="font-bold text-[#131b2e] truncate">{s.employee.name}</div>
+                          <div className="text-[10px] text-[#737688] truncate">{s.employee.position}</div>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="px-3 py-2.5 text-right font-bold text-[#0041c8] whitespace-nowrap">{formatUSD(s.usdAcc?.balance || 0)}</td>
+                    <td className="px-3 py-2.5 text-right font-bold text-[#006c49] whitespace-nowrap">{formatVES(s.vesAcc?.balance || 0)}</td>
+                    <td className="px-3 py-2.5 text-right font-extrabold text-[#131b2e] whitespace-nowrap">{formatUSD(s.totalUSD)}</td>
+                    <td className="px-3 sm:px-5 py-2.5" onClick={(e) => e.stopPropagation()}>
+                      <div className="flex items-center justify-end gap-1.5">
+                        <button
+                          onClick={() => handleOpenAssign(s.employee.id, s.employee.name)}
+                          className="flex items-center gap-1 py-1.5 px-2 bg-[#0041c8] text-white rounded-lg text-[11px] font-bold hover:bg-[#0036a8] whitespace-nowrap"
+                        >
+                          <Plus className="w-3 h-3" /> Asignar
+                        </button>
+                        <button
+                          onClick={() => openQuickExpenseForAccount([s.employee.assignedAccountId!, s.employee.exchangeCounterpartAccountId!])}
+                          className="flex items-center gap-1 py-1.5 px-2 bg-white border border-[#eaedff] text-[#434656] rounded-lg text-[11px] font-bold hover:bg-[#f2f3ff] whitespace-nowrap"
+                        >
+                          <Receipt className="w-3 h-3" /> Gasto
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
       {/* Assign Funds Modal */}
       {assignModal && (
         <div
@@ -435,56 +474,53 @@ export const AssignmentsScreen: React.FC = () => {
               </button>
             </div>
 
-            <div>
-              <label className="text-xs font-semibold text-[#434656] block mb-1">Desde cuenta del negocio</label>
-              <select
-                value={assignSourceId}
-                onChange={(e) => setAssignSourceId(e.target.value)}
-                className="w-full px-3 py-2 bg-[#f2f3ff] rounded-xl text-xs font-semibold outline-none border border-transparent focus:border-[#0041c8]"
-              >
-                {businessAccounts.map((a) => (
-                  <option key={a.id} value={a.id}>
-                    {a.name} ({a.currency === 'USD' ? formatUSD(a.balance) : formatVES(a.balance)})
-                  </option>
-                ))}
-              </select>
-            </div>
+            {assignSourceOptions.length === 0 ? (
+              <p className="text-xs text-[#a20030] font-semibold">
+                No tienes una cuenta del negocio en una moneda que este empleado pueda recibir.
+              </p>
+            ) : (
+              <>
+                <div>
+                  <label className="text-xs font-semibold text-[#434656] block mb-1">Desde cuenta</label>
+                  <select
+                    value={assignSourceId}
+                    onChange={(e) => {
+                      setAssignSourceId(e.target.value);
+                      setAssignAmount(0);
+                    }}
+                    className="w-full px-3 py-2 bg-[#f2f3ff] rounded-xl text-xs font-semibold outline-none border border-transparent focus:border-[#0041c8]"
+                  >
+                    {assignSourceOptions.map((a) => (
+                      <option key={a.id} value={a.id}>
+                        {a.name} ({a.currency === 'USD' ? formatUSD(a.balance) : formatVES(a.balance)})
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-[11px] text-[#737688] mt-1">
+                    Se acreditará en la cuenta de {assignModal.employeeName} de la misma moneda.
+                  </p>
+                </div>
 
-            <div>
-              <label className="text-xs font-semibold text-[#434656] block mb-1">Recibir en (moneda del empleado)</label>
-              <div className="flex gap-1 bg-[#eaedff] p-1 rounded-full">
-                <button
-                  type="button"
-                  onClick={() => setAssignCurrency('USD')}
-                  className={`flex-1 py-1.5 rounded-full text-xs font-bold transition-all ${assignCurrency === 'USD' ? 'bg-[#0041c8] text-white' : 'text-[#434656]'}`}
-                >
-                  USD ($)
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setAssignCurrency('VES')}
-                  className={`flex-1 py-1.5 rounded-full text-xs font-bold transition-all ${assignCurrency === 'VES' ? 'bg-[#0041c8] text-white' : 'text-[#434656]'}`}
-                >
-                  VES (Bs.)
-                </button>
-              </div>
-            </div>
-
-            <div>
-              <label className="text-xs font-semibold text-[#434656] block mb-1">Monto a asignar (USD)</label>
-              <input
-                type="number"
-                min="1"
-                step="any"
-                value={assignAmount || ''}
-                onChange={(e) => setAssignAmount(parseFloat(e.target.value) || 0)}
-                className="w-full px-3 py-2 bg-[#f2f3ff] rounded-xl text-sm font-bold outline-none border border-transparent focus:border-[#0041c8] focus:bg-white"
-              />
-            </div>
+                <div>
+                  <label className="text-xs font-semibold text-[#434656] block mb-1">
+                    Monto a asignar ({assignSourceAccount?.currency === 'VES' ? 'Bs.' : 'USD'})
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    step="any"
+                    value={assignAmount || ''}
+                    onChange={(e) => setAssignAmount(parseFloat(e.target.value) || 0)}
+                    className="w-full px-3 py-2 bg-[#f2f3ff] rounded-xl text-sm font-bold outline-none border border-transparent focus:border-[#0041c8] focus:bg-white"
+                  />
+                </div>
+              </>
+            )}
 
             <button
               onClick={handleConfirmAssign}
-              className="w-full py-3 px-4 bg-[#0041c8] hover:bg-[#0036a8] text-white rounded-xl font-display font-bold text-sm shadow-md flex items-center justify-center gap-2"
+              disabled={assignSourceOptions.length === 0}
+              className="w-full py-3 px-4 bg-[#0041c8] hover:bg-[#0036a8] disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-xl font-display font-bold text-sm shadow-md flex items-center justify-center gap-2"
             >
               <Wallet className="w-4 h-4" />
               <span>Confirmar Asignación</span>

@@ -7,7 +7,6 @@ import {
   HandCoins,
   CreditCard,
   CheckCircle2,
-  AlertCircle,
   ArrowDownRight,
   DollarSign,
   Receipt,
@@ -49,8 +48,6 @@ export const PayrollScreen: React.FC = () => {
   const [repayModal, setRepayModal] = useState<{ employeeId: string; loanId: string; maxAmount: number; employeeName: string } | null>(null);
   const [processPayModal, setProcessPayModal] = useState<Employee | null>(null);
   const [accessModal, setAccessModal] = useState<Employee | null>(null);
-  const [accessAccountId, setAccessAccountId] = useState<string>('');
-  const [accessCounterpartId, setAccessCounterpartId] = useState<string>('');
   const [generatedCode, setGeneratedCode] = useState<string | null>(null);
   const [grantingAccess, setGrantingAccess] = useState(false);
 
@@ -76,7 +73,7 @@ export const PayrollScreen: React.FC = () => {
   const [repayDestAccount, setRepayDestAccount] = useState<string>(businessAccounts[0]?.id || '');
 
   // Form states: Process Payroll
-  const [payrollPeriod, setPayrollPeriod] = useState<string>('1ra Quincena Septiembre 2026');
+  const [payrollPeriod, setPayrollPeriod] = useState<string>('');
   const [payrollAccountId, setPayrollAccountId] = useState<string>(businessAccounts[1]?.id || businessAccounts[0]?.id || '');
   const [payrollRate, setPayrollRate] = useState<number>(bcvRate);
   const [isCustomRate, setIsCustomRate] = useState<boolean>(false);
@@ -97,13 +94,26 @@ export const PayrollScreen: React.FC = () => {
     return e.name.toLowerCase().includes(q) || e.position.toLowerCase().includes(q);
   });
 
-  const handleCreateEmployee = (e: React.FormEvent) => {
+  const getDefaultPeriodLabel = (emp: Employee): string => {
+    const now = new Date();
+    const monthYear = now.toLocaleDateString('es-VE', { month: 'long', year: 'numeric' });
+    const capitalized = monthYear.charAt(0).toUpperCase() + monthYear.slice(1);
+    if (emp.paymentFrequency === 'quincenal') {
+      const half = now.getDate() <= 15 ? '1ra' : '2da';
+      return `${half} Quincena ${capitalized}`;
+    }
+    return capitalized;
+  };
+
+  const handleCreateEmployee = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!empName.trim()) {
       showToast('Por favor completa el nombre del empleado');
       return;
     }
-    const newEmp = addEmployee({
+    // Wait for the employee row to actually exist before linking accounts to
+    // it — otherwise that link update can silently miss (row not there yet).
+    const newEmp = await addEmployee({
       name: empName.trim(),
       position: empPosition.trim() || 'Colaborador General',
       monthlySalary: empSalary || 200,
@@ -113,7 +123,7 @@ export const PayrollScreen: React.FC = () => {
       status: 'active'
     });
     if (empNeedsAccount) {
-      provisionEmployeeAccounts(newEmp.id, newEmp.name);
+      await provisionEmployeeAccounts(newEmp.id, newEmp.name);
     }
     setNewEmployeeModal(false);
     setEmpName('');
@@ -159,12 +169,19 @@ export const PayrollScreen: React.FC = () => {
       showToast('Selecciona la segunda cuenta para el pago mixto');
       return;
     }
+    const rateToUse = isCustomRate ? payrollRate : bcvRate;
+    const secondaryAccount = businessAccounts.find((a) => a.id === secondaryPayrollAccountId);
+    // The amount was typed in that account's own currency — convert to USD
+    // (what processPayrollPayment expects) before sending it.
+    const secondaryAmountUSD = secondaryAccount && secondaryAccount.currency === 'VES'
+      ? secondaryPayrollAmount / rateToUse
+      : secondaryPayrollAmount;
     processPayrollPayment(
       processPayModal.id,
       payrollPeriod,
       payrollAccountId,
-      isCustomRate ? payrollRate : bcvRate,
-      isMixedPayment ? { secondaryAccountId: secondaryPayrollAccountId, secondaryAmountUSD: secondaryPayrollAmount } : undefined
+      rateToUse,
+      isMixedPayment ? { secondaryAccountId: secondaryPayrollAccountId, secondaryAmountUSD } : undefined
     );
     setProcessPayModal(null);
     setIsMixedPayment(false);
@@ -173,12 +190,18 @@ export const PayrollScreen: React.FC = () => {
 
   const handleGrantAccess = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!accessModal || !accessAccountId) {
-      showToast('Selecciona la cuenta que va a usar');
-      return;
-    }
+    if (!accessModal) return;
     setGrantingAccess(true);
-    const code = await grantEmployeeAccess(accessModal.id, accessAccountId, accessCounterpartId || undefined);
+    // If this employee doesn't have their own accounts yet, create them now —
+    // access is never granted by manually picking an account here.
+    let finalAccountId = accessModal.assignedAccountId;
+    let finalCounterpartId = accessModal.exchangeCounterpartAccountId;
+    if (!finalAccountId || !finalCounterpartId) {
+      const { usdAccountId, vesAccountId } = await provisionEmployeeAccounts(accessModal.id, accessModal.name);
+      finalAccountId = usdAccountId;
+      finalCounterpartId = vesAccountId;
+    }
+    const code = await grantEmployeeAccess(accessModal.id, finalAccountId, finalCounterpartId);
     setGrantingAccess(false);
     if (code) setGeneratedCode(code);
   };
@@ -317,122 +340,108 @@ export const PayrollScreen: React.FC = () => {
             />
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {filteredEmployees.map((emp) => {
-              const activeEmpLoans = emp.loans.filter((l) => l.status === 'active');
-              const totalDebt = activeEmpLoans.reduce((sum, l) => sum + l.remainingAmount, 0);
-              const isQuincenal = emp.paymentFrequency === 'quincenal';
-              const basePeriod = isQuincenal ? emp.monthlySalary / 2 : emp.monthlySalary;
-              const periodDeduction = activeEmpLoans.reduce((sum, l) => sum + Math.min(l.deductionPerPayment, l.remainingAmount), 0);
-              const netToReceive = Math.max(0, basePeriod - periodDeduction);
+          <div className="bg-white rounded-3xl border border-[#eaedff] shadow-[0_2px_12px_rgba(19,27,46,0.03)] overflow-hidden">
+            {filteredEmployees.length === 0 ? (
+              <p className="text-xs text-[#737688] py-10 text-center">Ningún empleado coincide con tu búsqueda.</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="text-left text-[10px] uppercase tracking-wide text-[#737688] border-b border-[#eaedff]">
+                      <th className="px-4 sm:px-5 py-2.5 font-semibold">Empleado</th>
+                      <th className="px-3 py-2.5 font-semibold">Frecuencia</th>
+                      <th className="px-3 py-2.5 font-semibold text-right">Sueldo</th>
+                      <th className="px-3 py-2.5 font-semibold text-right">Deuda</th>
+                      <th className="px-3 py-2.5 font-semibold">Acceso</th>
+                      <th className="px-3 sm:px-5 py-2.5 font-semibold text-right">Acciones</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredEmployees.map((emp) => {
+                      const activeEmpLoans = emp.loans.filter((l) => l.status === 'active');
+                      const totalDebt = activeEmpLoans.reduce((sum, l) => sum + l.remainingAmount, 0);
+                      const isQuincenal = emp.paymentFrequency === 'quincenal';
+                      const basePeriod = isQuincenal ? emp.monthlySalary / 2 : emp.monthlySalary;
+                      const periodDeduction = activeEmpLoans.reduce((sum, l) => sum + Math.min(l.deductionPerPayment, l.remainingAmount), 0);
 
-              return (
-                <div 
-                  key={emp.id} 
-                  className="bg-white rounded-2xl border border-[#eaedff] p-5 shadow-[0_2px_12px_rgba(19,27,46,0.03)] flex flex-col justify-between space-y-4"
-                >
-                  <div>
-                    {/* Header */}
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <h3 className="font-display font-bold text-base text-[#131b2e]">
-                          {emp.name}
-                        </h3>
-                        <p className="text-xs text-[#0041c8] font-semibold">{emp.position}</p>
-                      </div>
-
-                      <span className="px-2.5 py-0.5 rounded-full bg-[#f2f3ff] text-[#131b2e] text-[11px] font-bold border border-[#eaedff]">
-                        {emp.paymentFrequency === 'quincenal' ? 'Quincenal' : 'Mensual'}
-                      </span>
-                    </div>
-
-                    {/* Salary & Debt Row */}
-                    <div className="grid grid-cols-2 gap-2 mt-4 p-3 bg-[#faf8ff] rounded-xl border border-[#eaedff] text-xs">
-                      <div>
-                        <span className="text-[#737688] block text-[11px]">Sueldo Base:</span>
-                        <strong className="font-display text-sm text-[#131b2e]">
-                          ${emp.monthlySalary.toFixed(2)}/mes
-                        </strong>
-                        <span className="text-[10px] text-[#737688] block">(${basePeriod.toFixed(2)} por pago)</span>
-                      </div>
-
-                      <div>
-                        <span className="text-[#737688] block text-[11px]">Deuda / Adelantos:</span>
-                        {totalDebt > 0 ? (
-                          <>
-                            <strong className="font-display text-sm text-[#b45309]">
-                              ${totalDebt.toFixed(2)} por cobrar
-                            </strong>
-                            <span className="text-[10px] text-[#dc2626] block font-semibold">
-                              Desc. próximo: -${periodDeduction.toFixed(2)}
+                      return (
+                        <tr key={emp.id} className="border-b border-[#f2f3ff] last:border-0 hover:bg-[#faf8ff] transition-colors">
+                          <td className="px-4 sm:px-5 py-3">
+                            <div className="font-bold text-[#131b2e]">{emp.name}</div>
+                            <div className="text-[10px] text-[#737688]">{emp.position}</div>
+                          </td>
+                          <td className="px-3 py-3 whitespace-nowrap">
+                            <span className="px-2 py-0.5 rounded-full bg-[#f2f3ff] text-[#131b2e] text-[10px] font-bold border border-[#eaedff]">
+                              {isQuincenal ? 'Quincenal' : 'Mensual'}
                             </span>
-                          </>
-                        ) : (
-                          <span className="text-[#006c49] font-bold text-xs">Sin deudas al día</span>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Net preview notice */}
-                    {totalDebt > 0 && (
-                      <div className="mt-2.5 p-2 bg-[#fffbeb] rounded-lg border border-[#fef3c7] flex items-center gap-2 text-[11px] text-[#92400e]">
-                        <AlertCircle className="w-3.5 h-3.5 shrink-0 text-[#f59e0b]" />
-                        <span>
-                          Si no abona antes del corte, cobrará neto: <strong>${netToReceive.toFixed(2)}</strong>
-                        </span>
-                      </div>
-                    )}
-
-                    {/* App access status */}
-                    <div className="mt-2.5 flex items-center justify-between text-[11px]">
-                      {emp.authUserId ? (
-                        <span className="text-[#006c49] font-semibold flex items-center gap-1">
-                          <ShieldCheck className="w-3.5 h-3.5" />
-                          Acceso activo · {accounts.find((a) => a.id === emp.assignedAccountId)?.name || 'cuenta asignada'}
-                        </span>
-                      ) : (
-                        <button
-                          onClick={() => {
-                            setAccessModal(emp);
-                            setAccessAccountId(emp.assignedAccountId || accounts[0]?.id || '');
-                            setAccessCounterpartId(emp.exchangeCounterpartAccountId || '');
-                            setGeneratedCode(null);
-                          }}
-                          className="text-[#0041c8] font-bold hover:underline"
-                        >
-                          Dar acceso a la app
-                        </button>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Action Buttons */}
-                  <div className="pt-2 border-t border-[#eaedff] flex items-center justify-between gap-2">
-                    <button
-                      onClick={() => {
-                        setLoanEmpId(emp.id);
-                        setNewLoanModal(true);
-                      }}
-                      className="px-3 py-1.5 bg-[#f2f3ff] hover:bg-[#eaedff] text-[#0041c8] rounded-xl text-xs font-bold transition-colors"
-                    >
-                      + Adelanto/Préstamo
-                    </button>
-
-                    <button
-                      onClick={() => {
-                        setProcessPayModal(emp);
-                        setIsMixedPayment(false);
-                        setSecondaryPayrollAmount(0);
-                        setSecondaryPayrollAccountId(businessAccounts.find((a) => a.id !== payrollAccountId)?.id || businessAccounts[0]?.id || '');
-                      }}
-                      className="px-4 py-2 bg-[#0041c8] hover:bg-[#0036a8] text-white rounded-xl text-xs font-display font-bold shadow-xs transition-colors"
-                    >
-                      Pagar Nómina
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
+                          </td>
+                          <td className="px-3 py-3 text-right whitespace-nowrap">
+                            <div className="font-bold text-[#131b2e]">${emp.monthlySalary.toFixed(2)}/mes</div>
+                            <div className="text-[10px] text-[#737688]">${basePeriod.toFixed(2)} por pago</div>
+                          </td>
+                          <td className="px-3 py-3 text-right whitespace-nowrap">
+                            {totalDebt > 0 ? (
+                              <>
+                                <div className="font-bold text-[#b45309]">${totalDebt.toFixed(2)}</div>
+                                <div className="text-[10px] text-[#dc2626] font-semibold">Desc: -${periodDeduction.toFixed(2)}</div>
+                              </>
+                            ) : (
+                              <span className="text-[#006c49] font-bold">Al día</span>
+                            )}
+                          </td>
+                          <td className="px-3 py-3 whitespace-nowrap">
+                            {emp.authUserId ? (
+                              <span className="text-[#006c49] font-semibold flex items-center gap-1">
+                                <ShieldCheck className="w-3.5 h-3.5" /> Activo
+                              </span>
+                            ) : (
+                              <button
+                                onClick={() => {
+                                  setAccessModal(emp);
+                                  setGeneratedCode(null);
+                                }}
+                                className="text-[#0041c8] font-bold hover:underline"
+                              >
+                                Dar acceso
+                              </button>
+                            )}
+                          </td>
+                          <td className="px-3 sm:px-5 py-3">
+                            <div className="flex items-center justify-end gap-1.5">
+                              <button
+                                onClick={() => {
+                                  setLoanEmpId(emp.id);
+                                  setNewLoanModal(true);
+                                }}
+                                className="py-1.5 px-2 bg-[#f2f3ff] hover:bg-[#eaedff] text-[#0041c8] rounded-lg text-[11px] font-bold whitespace-nowrap transition-colors"
+                              >
+                                + Préstamo
+                              </button>
+                              <button
+                                onClick={() => {
+                                  setProcessPayModal(emp);
+                                  setPayrollPeriod(getDefaultPeriodLabel(emp));
+                                  setIsCustomRate(false);
+                                  setPayrollRate(bcvRate);
+                                  const defaultAccountId = businessAccounts[1]?.id || businessAccounts[0]?.id || '';
+                                  setPayrollAccountId(defaultAccountId);
+                                  setIsMixedPayment(false);
+                                  setSecondaryPayrollAmount(0);
+                                  setSecondaryPayrollAccountId(businessAccounts.find((a) => a.id !== defaultAccountId)?.id || businessAccounts[0]?.id || '');
+                                }}
+                                className="py-1.5 px-2.5 bg-[#0041c8] hover:bg-[#0036a8] text-white rounded-lg text-[11px] font-bold whitespace-nowrap transition-colors"
+                              >
+                                Pagar
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -931,6 +940,19 @@ export const PayrollScreen: React.FC = () => {
               const rateToUse = isCustomRate ? payrollRate : bcvRate;
               const netVES = netUSD * rateToUse;
 
+              const sourceAccount = businessAccounts.find((a) => a.id === payrollAccountId);
+              const isSourceUSD = !sourceAccount || sourceAccount.currency === 'USD';
+              const secondaryAccount = isMixedPayment ? businessAccounts.find((a) => a.id === secondaryPayrollAccountId) : undefined;
+              const isSecondaryUSD = !secondaryAccount || secondaryAccount.currency === 'USD';
+              const secondaryAmountUSD = isMixedPayment ? (isSecondaryUSD ? secondaryPayrollAmount : secondaryPayrollAmount / rateToUse) : 0;
+              const primaryAmountUSD = Math.max(0, netUSD - secondaryAmountUSD);
+              const primaryChargeAmount = isSourceUSD ? primaryAmountUSD : primaryAmountUSD * rateToUse;
+              const secondaryChargeAmount = secondaryAccount ? (isSecondaryUSD ? secondaryAmountUSD : secondaryAmountUSD * rateToUse) : 0;
+
+              const insufficientPrimary = !!sourceAccount && primaryChargeAmount > sourceAccount.balance;
+              const insufficientSecondary = !!secondaryAccount && secondaryChargeAmount > secondaryAccount.balance;
+              const hasInsufficientBalance = insufficientPrimary || insufficientSecondary;
+
               return (
                 <div className="space-y-4">
                   {/* Calculation Card */}
@@ -1014,7 +1036,7 @@ export const PayrollScreen: React.FC = () => {
                       <select
                         value={payrollAccountId}
                         onChange={(e) => setPayrollAccountId(e.target.value)}
-                        className="w-full px-3 py-2 bg-[#f2f3ff] rounded-xl text-xs font-semibold outline-none border border-transparent focus:border-[#0041c8]"
+                        className={`w-full px-3 py-2 bg-[#f2f3ff] rounded-xl text-xs font-semibold outline-none border ${insufficientPrimary ? 'border-[#ca1c43]' : 'border-transparent'} focus:border-[#0041c8]`}
                       >
                         {businessAccounts.map((a) => (
                           <option key={a.id} value={a.id}>
@@ -1022,6 +1044,12 @@ export const PayrollScreen: React.FC = () => {
                           </option>
                         ))}
                       </select>
+                      {insufficientPrimary && sourceAccount && (
+                        <p className="text-[11px] font-semibold text-[#a20030] mt-1">
+                          Saldo insuficiente: {sourceAccount.name} tiene {isSourceUSD ? formatUSD(sourceAccount.balance) : formatVES(sourceAccount.balance)}
+                          {' '}y se necesitan {isSourceUSD ? formatUSD(primaryChargeAmount) : formatVES(primaryChargeAmount)}.
+                        </p>
+                      )}
                     </div>
 
                     <button
@@ -1032,39 +1060,56 @@ export const PayrollScreen: React.FC = () => {
                       {isMixedPayment ? '× Quitar pago mixto' : '+ Pagar mixto (ej. parte en efectivo, parte en Bs.)'}
                     </button>
 
-                    {isMixedPayment && (
-                      <div className="p-3 bg-[#f2f3ff] rounded-xl border border-[#eaedff] space-y-3">
-                        <div>
-                          <label className="text-xs font-semibold text-[#434656] block mb-1">Segunda cuenta</label>
-                          <select
-                            value={secondaryPayrollAccountId}
-                            onChange={(e) => setSecondaryPayrollAccountId(e.target.value)}
-                            className="w-full px-3 py-2 bg-white rounded-xl text-xs font-semibold outline-none border border-transparent focus:border-[#0041c8]"
-                          >
-                            {businessAccounts.filter((a) => a.id !== payrollAccountId).map((a) => (
-                              <option key={a.id} value={a.id}>
-                                {a.name} ({a.currency === 'USD' ? formatUSD(a.balance) : formatVES(a.balance)})
-                              </option>
-                            ))}
-                          </select>
+                    {isMixedPayment && (() => {
+                      const secondaryMaxNative = isSecondaryUSD ? netUSD : netUSD * rateToUse;
+
+                      return (
+                        <div className="p-3 bg-[#f2f3ff] rounded-xl border border-[#eaedff] space-y-3">
+                          <div>
+                            <label className="text-xs font-semibold text-[#434656] block mb-1">Segunda cuenta</label>
+                            <select
+                              value={secondaryPayrollAccountId}
+                              onChange={(e) => {
+                                setSecondaryPayrollAccountId(e.target.value);
+                                setSecondaryPayrollAmount(0);
+                              }}
+                              className={`w-full px-3 py-2 bg-white rounded-xl text-xs font-semibold outline-none border ${insufficientSecondary ? 'border-[#ca1c43]' : 'border-transparent'} focus:border-[#0041c8]`}
+                            >
+                              {businessAccounts.filter((a) => a.id !== payrollAccountId).map((a) => (
+                                <option key={a.id} value={a.id}>
+                                  {a.name} ({a.currency === 'USD' ? formatUSD(a.balance) : formatVES(a.balance)})
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                          <div>
+                            <label className="text-xs font-semibold text-[#434656] block mb-1">
+                              Monto a pagar desde esa cuenta ({isSecondaryUSD ? 'USD' : 'Bs.'})
+                            </label>
+                            <input
+                              type="number"
+                              min="0"
+                              max={secondaryMaxNative}
+                              step="any"
+                              value={secondaryPayrollAmount || ''}
+                              onChange={(e) => setSecondaryPayrollAmount(Math.min(parseFloat(e.target.value) || 0, secondaryMaxNative))}
+                              className="w-full px-3 py-2 bg-white rounded-xl text-xs font-bold outline-none border border-transparent focus:border-[#0041c8]"
+                            />
+                          </div>
+                          <div className="text-[11px] text-[#434656] pt-1 border-t border-[#eaedff]">
+                            Cuenta principal: <strong>${primaryAmountUSD.toFixed(2)}</strong> · Segunda cuenta:{' '}
+                            <strong>{isSecondaryUSD ? `$${secondaryPayrollAmount.toFixed(2)}` : `Bs. ${secondaryPayrollAmount.toLocaleString('es-VE', { maximumFractionDigits: 2 })}`}</strong>
+                            {' '}(≈ ${secondaryAmountUSD.toFixed(2)})
+                          </div>
+                          {insufficientSecondary && secondaryAccount && (
+                            <p className="text-[11px] font-semibold text-[#a20030]">
+                              Saldo insuficiente: {secondaryAccount.name} tiene {isSecondaryUSD ? formatUSD(secondaryAccount.balance) : formatVES(secondaryAccount.balance)}
+                              {' '}y se necesitan {isSecondaryUSD ? formatUSD(secondaryChargeAmount) : formatVES(secondaryChargeAmount)}.
+                            </p>
+                          )}
                         </div>
-                        <div>
-                          <label className="text-xs font-semibold text-[#434656] block mb-1">Monto a pagar desde esa cuenta (USD)</label>
-                          <input
-                            type="number"
-                            min="0"
-                            max={netUSD}
-                            step="any"
-                            value={secondaryPayrollAmount || ''}
-                            onChange={(e) => setSecondaryPayrollAmount(Math.min(parseFloat(e.target.value) || 0, netUSD))}
-                            className="w-full px-3 py-2 bg-white rounded-xl text-xs font-bold outline-none border border-transparent focus:border-[#0041c8]"
-                          />
-                        </div>
-                        <div className="text-[11px] text-[#434656] pt-1 border-t border-[#eaedff]">
-                          Cuenta principal: <strong>${(netUSD - secondaryPayrollAmount).toFixed(2)}</strong> · Segunda cuenta: <strong>${secondaryPayrollAmount.toFixed(2)}</strong>
-                        </div>
-                      </div>
-                    )}
+                      );
+                    })()}
                   </div>
 
                   <div className="pt-3 border-t border-[#eaedff] flex items-center justify-end gap-2">
@@ -1078,9 +1123,10 @@ export const PayrollScreen: React.FC = () => {
                     <button
                       type="button"
                       onClick={handleExecutePayroll}
-                      className="px-5 py-2.5 bg-[#0041c8] hover:bg-[#0036a8] text-white rounded-xl text-xs font-display font-bold shadow-md"
+                      disabled={hasInsufficientBalance}
+                      className="px-5 py-2.5 bg-[#0041c8] hover:bg-[#0036a8] disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-xl text-xs font-display font-bold shadow-md"
                     >
-                      Confirmar y Liquidar Pago
+                      {hasInsufficientBalance ? 'Saldo insuficiente' : 'Confirmar y Liquidar Pago'}
                     </button>
                   </div>
                 </div>
@@ -1137,39 +1183,23 @@ export const PayrollScreen: React.FC = () => {
               </div>
             ) : (
               <form onSubmit={handleGrantAccess} className="space-y-3.5">
-                <div>
-                  <label className="text-xs font-semibold text-[#434656] block mb-1">Cuenta que va a operar</label>
-                  <select
-                    value={accessAccountId}
-                    onChange={(e) => setAccessAccountId(e.target.value)}
-                    className="w-full px-3 py-2 bg-[#f2f3ff] rounded-xl text-xs sm:text-sm font-semibold outline-none border border-transparent focus:border-[#0041c8]"
-                  >
-                    {accounts.map((a) => (
-                      <option key={a.id} value={a.id}>{a.name} ({a.currency})</option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="text-xs font-semibold text-[#434656] block mb-1">
-                    Cuenta contraparte para cambios de divisa (opcional)
-                  </label>
-                  <select
-                    value={accessCounterpartId}
-                    onChange={(e) => setAccessCounterpartId(e.target.value)}
-                    className="w-full px-3 py-2 bg-[#f2f3ff] rounded-xl text-xs sm:text-sm font-semibold outline-none border border-transparent focus:border-[#0041c8]"
-                  >
-                    <option value="">Ninguna — no hará cambios de moneda</option>
-                    {accounts.filter((a) => a.id !== accessAccountId).map((a) => (
-                      <option key={a.id} value={a.id}>{a.name} ({a.currency})</option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="p-3 bg-[#f2f3ff] rounded-xl text-[11px] text-[#434656]">
-                  {accessModal.name} solo podrá ver y usar {accessCounterpartId ? 'estas dos cuentas' : 'esta cuenta'} —
-                  nunca el resto del negocio, la nómina ni otros empleados.
-                </div>
+                {accessModal.assignedAccountId && accessModal.exchangeCounterpartAccountId ? (
+                  <div className="p-3 bg-[#f2f3ff] rounded-xl text-xs text-[#434656] space-y-1">
+                    <p className="font-bold text-[#131b2e]">Ya tiene sus propias cuentas (USD y VES)</p>
+                    <p>
+                      {accessModal.name} entrará viendo únicamente sus dos cuentas de Asignaciones —
+                      no hace falta elegir nada más.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="p-3 bg-[#f2f3ff] rounded-xl text-xs text-[#434656] space-y-1">
+                    <p className="font-bold text-[#131b2e]">Aún no tiene cuentas propias</p>
+                    <p>
+                      Al generar el código se le crearán automáticamente una cuenta en USD y otra en VES
+                      — {accessModal.name} solo podrá ver y usar esas dos, nunca el resto del negocio.
+                    </p>
+                  </div>
+                )}
 
                 <div className="pt-3 border-t border-[#eaedff] flex items-center justify-end gap-2">
                   <button

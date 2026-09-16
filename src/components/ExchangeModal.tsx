@@ -295,8 +295,19 @@ export const ExchangeModal: React.FC = () => {
                 {isVesToUsd ? 'VES (Bs.)' : 'USD ($)'}
               </div>
             </div>
-            <div className="mt-2 pt-2 border-t border-[#f2f3ff] text-xs text-[#737688]">
-              Desde: <strong className="text-[#131b2e]">{fromAccount.name}</strong>
+            <div className="mt-2 pt-2 border-t border-[#f2f3ff]">
+              <label className="text-xs text-[#737688] block mb-1">Desde:</label>
+              <select
+                value={fromAccountId}
+                onChange={(e) => setFromAccountId(e.target.value)}
+                className="w-full px-2.5 py-1.5 bg-[#f2f3ff] rounded-lg text-xs font-bold text-[#131b2e] outline-none border border-transparent focus:border-[#0041c8]"
+              >
+                {availableAccounts.filter((a) => a.currency === (isVesToUsd ? 'VES' : 'USD')).map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.name} ({isVesToUsd ? formatVES(a.balance) : formatUSD(a.balance)})
+                  </option>
+                ))}
+              </select>
             </div>
             {insufficientBalance && (
               <div className="mt-2 text-xs font-semibold text-[#a20030]">
@@ -361,8 +372,19 @@ export const ExchangeModal: React.FC = () => {
                 {isVesToUsd ? 'USD ($)' : 'VES (Bs.)'}
               </div>
             </div>
-            <div className="mt-2 pt-2 border-t border-[#eaedff] text-xs text-[#737688]">
-              Hacia: <strong className="text-[#131b2e]">{toAccount.name}</strong>
+            <div className="mt-2 pt-2 border-t border-[#eaedff]">
+              <label className="text-xs text-[#737688] block mb-1">Hacia:</label>
+              <select
+                value={toAccountId}
+                onChange={(e) => setToAccountId(e.target.value)}
+                className="w-full px-2.5 py-1.5 bg-white rounded-lg text-xs font-bold text-[#131b2e] outline-none border border-transparent focus:border-[#0041c8]"
+              >
+                {availableAccounts.filter((a) => a.currency === (isVesToUsd ? 'USD' : 'VES')).map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.name} ({isVesToUsd ? formatUSD(a.balance) : formatVES(a.balance)})
+                  </option>
+                ))}
+              </select>
             </div>
           </div>
 

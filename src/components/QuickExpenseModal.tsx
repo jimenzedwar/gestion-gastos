@@ -74,6 +74,17 @@ export const QuickExpenseModal: React.FC = () => {
   const currentAmount = parseFloat(amountStr) || 0;
   const convertedAmount = currency === 'USD' ? currentAmount * bcvRate : currentAmount / bcvRate;
 
+  const handleAmountInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const raw = e.target.value;
+    if (raw === '') {
+      setAmountStr('0');
+      return;
+    }
+    // Only digits and a single decimal point, up to 2 decimals — same rule the tactile keypad follows
+    if (!/^\d*\.?\d{0,2}$/.test(raw)) return;
+    setAmountStr(raw);
+  };
+
   const handleKeypadPress = (val: string) => {
     if (val === 'backspace') {
       setAmountStr((prev) => (prev.length > 1 ? prev.slice(0, -1) : '0'));
@@ -211,11 +222,19 @@ export const QuickExpenseModal: React.FC = () => {
             </div>
           </div>
 
-          {/* Amount Display */}
+          {/* Amount Display — editable directly from the keyboard, or via the keypad below */}
           <div className="text-center py-2">
             <div className="flex items-baseline justify-center gap-2 font-display text-4xl sm:text-5xl font-extrabold text-[#131b2e] tracking-tight">
               <span className="text-[#0041c8]">{currency === 'USD' ? '$' : 'Bs.'}</span>
-              <span>{currentAmount.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+              <input
+                type="text"
+                inputMode="decimal"
+                value={amountStr}
+                onChange={handleAmountInputChange}
+                onFocus={(e) => e.target.select()}
+                className="bg-transparent outline-none text-center font-display text-4xl sm:text-5xl font-extrabold text-[#131b2e] tracking-tight"
+                style={{ width: `${Math.max(2, amountStr.length + 1)}ch` }}
+              />
             </div>
             <div className="mt-1 text-xs text-[#434656] font-medium">
               ≈ {currency === 'USD' ? 'Bs.' : '$'}{' '}
@@ -268,8 +287,8 @@ export const QuickExpenseModal: React.FC = () => {
             <label className="block text-xs font-bold text-[#434656] mb-1.5">
               {isIncome ? 'Recibir en cuenta' : 'Pagar desde cuenta'}
             </label>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-              {availableAccounts.slice(0, 3).map((acc) => {
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 max-h-56 overflow-y-auto pr-0.5">
+              {availableAccounts.map((acc) => {
                 const isSelected = selectedAccountId === acc.id;
                 return (
                   <button
