@@ -1,6 +1,6 @@
 {
-  "name": "Monedero - Finanzas USD & VES",
-  "description": "Gestión financiera bimonetaria con tasa BCV en tiempo real, registro rápido de gastos, cálculo Pago Móvil y conversión de divisas.",
+  "name": "Gestion de gastos",
+  "description": "Lleva el control de tus gastos diarios",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }
