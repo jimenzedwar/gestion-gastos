@@ -145,8 +145,8 @@ export const ChartsScreen: React.FC = () => {
     });
 
     return [
-      { name: 'Billeteras USD (Zinli / Zelle)', value: Math.round(usdTotal), color: '#0041c8' },
-      { name: 'Bancos VES (Pago Móvil)', value: Math.round(vesInUsd), color: '#006c49' },
+      { name: 'Billeteras USD', value: Math.round(usdTotal), color: '#0041c8' },
+      { name: 'Bancos VES', value: Math.round(vesInUsd), color: '#006c49' },
       { name: 'Efectivo en Mano', value: Math.round(cashTotal), color: '#10b981' },
     ];
   }, [accounts, bcvRate]);

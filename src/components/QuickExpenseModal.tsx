@@ -75,7 +75,9 @@ export const QuickExpenseModal: React.FC = () => {
   const convertedAmount = currency === 'USD' ? currentAmount * bcvRate : currentAmount / bcvRate;
 
   const handleAmountInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const raw = e.target.value;
+    // Venezuelan keyboards (inputMode="decimal") type a comma for the decimal
+    // separator, not a period — accept either and normalize to a period.
+    const raw = e.target.value.replace(',', '.');
     if (raw === '') {
       setAmountStr('0');
       return;

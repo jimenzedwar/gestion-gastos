@@ -58,6 +58,8 @@ interface AppContextType {
   employees: Employee[];
   payrollHistory: PayrollPayment[];
   addEmployee: (emp: Omit<Employee, 'id' | 'loans'>) => Promise<Employee>;
+  updateEmployee: (employeeId: string, updates: Partial<Omit<Employee, 'id' | 'loans'>>) => void;
+  deleteEmployee: (employeeId: string) => void;
   requestLoan: (employeeId: string, loanData: { type: 'advance' | 'loan'; description: string; totalAmount: number; deductionPerPayment: number; payFromAccountId?: string }) => void;
   repayLoan: (employeeId: string, loanId: string, amount: number, accountId?: string) => void;
   processPayrollPayment: (
@@ -499,6 +501,38 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     showToast(`Empleado ${newEmp.name} registrado con éxito`);
     return newEmp;
+  };
+
+  const updateEmployee = (employeeId: string, updates: Partial<Omit<Employee, 'id' | 'loans'>>) => {
+    let updatedEmp: Employee | null = null;
+    setEmployees((prev) =>
+      prev.map((e) => {
+        if (e.id !== employeeId) return e;
+        updatedEmp = { ...e, ...updates };
+        return updatedEmp;
+      })
+    );
+
+    if (user && updatedEmp) {
+      supabase.from('employees').update(employeeToDb(updatedEmp, ownerId || user.id)).eq('id', employeeId).then(({ error }) => {
+        if (error) syncError('empleado');
+      });
+    }
+
+    showToast('Empleado actualizado');
+  };
+
+  const deleteEmployee = (employeeId: string) => {
+    const emp = employees.find((e) => e.id === employeeId);
+    setEmployees((prev) => prev.filter((e) => e.id !== employeeId));
+
+    if (user) {
+      supabase.from('employees').delete().eq('id', employeeId).then(({ error }) => {
+        if (error) syncError('eliminación de empleado');
+      });
+    }
+
+    showToast(`Empleado ${emp?.name || ''} eliminado`);
   };
 
   const generateInviteCode = (): string => {
@@ -1176,6 +1210,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         employees,
         payrollHistory,
         addEmployee,
+        updateEmployee,
+        deleteEmployee,
         requestLoan,
         repayLoan,
         processPayrollPayment,

@@ -18,7 +18,9 @@ import {
   FileText,
   BadgeAlert,
   ShieldCheck,
-  Copy
+  Copy,
+  Pencil,
+  Trash2
 } from 'lucide-react';
 
 export const PayrollScreen: React.FC = () => {
@@ -29,6 +31,8 @@ export const PayrollScreen: React.FC = () => {
     businessAccounts,
     bcvRate,
     addEmployee,
+    updateEmployee,
+    deleteEmployee,
     provisionEmployeeAccounts,
     requestLoan,
     repayLoan,
@@ -50,8 +54,10 @@ export const PayrollScreen: React.FC = () => {
   const [accessModal, setAccessModal] = useState<Employee | null>(null);
   const [generatedCode, setGeneratedCode] = useState<string | null>(null);
   const [grantingAccess, setGrantingAccess] = useState(false);
+  const [deleteConfirmEmployee, setDeleteConfirmEmployee] = useState<Employee | null>(null);
 
-  // Form states: New Employee
+  // Form states: New/Edit Employee
+  const [editingEmployeeId, setEditingEmployeeId] = useState<string | null>(null);
   const [empName, setEmpName] = useState('');
   const [empPosition, setEmpPosition] = useState('');
   const [empSalary, setEmpSalary] = useState<number>(250);
@@ -105,30 +111,75 @@ export const PayrollScreen: React.FC = () => {
     return capitalized;
   };
 
-  const handleCreateEmployee = async (e: React.FormEvent) => {
+  const resetEmployeeForm = () => {
+    setEmpName('');
+    setEmpPosition('');
+    setEmpSalary(250);
+    setEmpFreq('quincenal');
+    setEmpMethod('pago_movil');
+    setEmpBank('0134 - Banesco');
+    setEmpNeedsAccount(false);
+    setEditingEmployeeId(null);
+  };
+
+  const handleOpenNewEmployee = () => {
+    resetEmployeeForm();
+    setNewEmployeeModal(true);
+  };
+
+  const handleOpenEditEmployee = (emp: Employee) => {
+    setEditingEmployeeId(emp.id);
+    setEmpName(emp.name);
+    setEmpPosition(emp.position);
+    setEmpSalary(emp.monthlySalary);
+    setEmpFreq(emp.paymentFrequency);
+    setEmpMethod(emp.paymentMethod);
+    setEmpBank(emp.pagoMovilBank || '0134 - Banesco');
+    setEmpNeedsAccount(false);
+    setNewEmployeeModal(true);
+  };
+
+  const handleSubmitEmployee = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!empName.trim()) {
       showToast('Por favor completa el nombre del empleado');
       return;
     }
-    // Wait for the employee row to actually exist before linking accounts to
-    // it — otherwise that link update can silently miss (row not there yet).
-    const newEmp = await addEmployee({
-      name: empName.trim(),
-      position: empPosition.trim() || 'Colaborador General',
-      monthlySalary: empSalary || 200,
-      paymentFrequency: empFreq,
-      paymentMethod: empMethod,
-      pagoMovilBank: empMethod === 'pago_movil' ? empBank : undefined,
-      status: 'active'
-    });
-    if (empNeedsAccount) {
-      await provisionEmployeeAccounts(newEmp.id, newEmp.name);
+
+    if (editingEmployeeId) {
+      updateEmployee(editingEmployeeId, {
+        name: empName.trim(),
+        position: empPosition.trim() || 'Colaborador General',
+        monthlySalary: empSalary || 200,
+        paymentFrequency: empFreq,
+        paymentMethod: empMethod,
+        pagoMovilBank: empMethod === 'pago_movil' ? empBank : undefined
+      });
+    } else {
+      // Wait for the employee row to actually exist before linking accounts to
+      // it — otherwise that link update can silently miss (row not there yet).
+      const newEmp = await addEmployee({
+        name: empName.trim(),
+        position: empPosition.trim() || 'Colaborador General',
+        monthlySalary: empSalary || 200,
+        paymentFrequency: empFreq,
+        paymentMethod: empMethod,
+        pagoMovilBank: empMethod === 'pago_movil' ? empBank : undefined,
+        status: 'active'
+      });
+      if (empNeedsAccount) {
+        await provisionEmployeeAccounts(newEmp.id, newEmp.name);
+      }
     }
+
     setNewEmployeeModal(false);
-    setEmpName('');
-    setEmpPosition('');
-    setEmpNeedsAccount(false);
+    resetEmployeeForm();
+  };
+
+  const handleConfirmDeleteEmployee = () => {
+    if (!deleteConfirmEmployee) return;
+    deleteEmployee(deleteConfirmEmployee.id);
+    setDeleteConfirmEmployee(null);
   };
 
   const handleCreateLoan = (e: React.FormEvent) => {
@@ -235,7 +286,7 @@ export const PayrollScreen: React.FC = () => {
           </button>
 
           <button
-            onClick={() => setNewEmployeeModal(true)}
+            onClick={handleOpenNewEmployee}
             className="flex items-center gap-1.5 px-3.5 py-2 bg-[#0041c8] text-white rounded-xl text-xs font-display font-bold shadow-md hover:bg-[#0036a8] transition-all active:scale-95"
           >
             <Plus className="w-4 h-4" />
@@ -408,6 +459,20 @@ export const PayrollScreen: React.FC = () => {
                           </td>
                           <td className="px-3 sm:px-5 py-3">
                             <div className="flex items-center justify-end gap-1.5">
+                              <button
+                                onClick={() => handleOpenEditEmployee(emp)}
+                                title="Editar empleado"
+                                className="p-1.5 bg-[#f2f3ff] hover:bg-[#eaedff] text-[#434656] rounded-lg transition-colors"
+                              >
+                                <Pencil className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                onClick={() => setDeleteConfirmEmployee(emp)}
+                                title="Eliminar empleado"
+                                className="p-1.5 bg-[#ffdadb] hover:bg-[#ffc2c4] text-[#a20030] rounded-lg transition-colors"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
                               <button
                                 onClick={() => {
                                   setLoanEmpId(emp.id);
@@ -594,18 +659,20 @@ export const PayrollScreen: React.FC = () => {
         </div>
       )}
 
-      {/* Modal: Add Employee */}
+      {/* Modal: Add/Edit Employee */}
       {newEmployeeModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#131b2e]/60 backdrop-blur-xs" onClick={() => setNewEmployeeModal(false)}>
           <div className="w-full max-w-lg bg-white rounded-3xl p-6 border border-[#eaedff] shadow-2xl space-y-4 max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between border-b border-[#eaedff] pb-3">
-              <h3 className="font-display font-bold text-lg text-[#131b2e]">Registrar Nuevo Empleado</h3>
+              <h3 className="font-display font-bold text-lg text-[#131b2e]">
+                {editingEmployeeId ? 'Editar Empleado' : 'Registrar Nuevo Empleado'}
+              </h3>
               <button onClick={() => setNewEmployeeModal(false)} className="p-1 rounded-full hover:bg-[#f2f3ff]">
                 <X className="w-5 h-5 text-[#737688]" />
               </button>
             </div>
 
-            <form onSubmit={handleCreateEmployee} className="space-y-3.5">
+            <form onSubmit={handleSubmitEmployee} className="space-y-3.5">
               <div>
                 <label className="text-xs font-semibold text-[#434656] block mb-1">Nombre Completo</label>
                 <input
@@ -661,25 +728,27 @@ export const PayrollScreen: React.FC = () => {
                     onChange={(e) => setEmpMethod(e.target.value as any)}
                     className="w-full px-3 py-2 bg-[#f2f3ff] rounded-xl text-xs sm:text-sm font-semibold outline-none border border-transparent focus:border-[#0041c8] focus:bg-white"
                   >
-                    <option value="pago_movil">Pago Móvil (VES)</option>
-                    <option value="cash_usd">Efectivo (USD en mano)</option>
-                    <option value="zinli">Zinli Card (USD)</option>
+                    <option value="pago_movil">Pago Móvil</option>
+                    <option value="cash_usd">Efectivo en mano (USD)</option>
+                    <option value="zinli">Billetera Digital (USD)</option>
                   </select>
                 </div>
               </div>
 
-              <label className="flex items-start gap-2.5 p-3 bg-[#f2f3ff] rounded-xl cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={empNeedsAccount}
-                  onChange={(e) => setEmpNeedsAccount(e.target.checked)}
-                  className="mt-0.5 w-4 h-4 accent-[#0041c8]"
-                />
-                <span className="text-xs text-[#434656]">
-                  <span className="font-bold text-[#131b2e] block">¿Este empleado necesita una cuenta para gastos?</span>
-                  Se le crearán automáticamente una cuenta en USD y otra en VES, visibles en Asignaciones.
-                </span>
-              </label>
+              {!editingEmployeeId && (
+                <label className="flex items-start gap-2.5 p-3 bg-[#f2f3ff] rounded-xl cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={empNeedsAccount}
+                    onChange={(e) => setEmpNeedsAccount(e.target.checked)}
+                    className="mt-0.5 w-4 h-4 accent-[#0041c8]"
+                  />
+                  <span className="text-xs text-[#434656]">
+                    <span className="font-bold text-[#131b2e] block">¿Este empleado necesita una cuenta para gastos?</span>
+                    Se le crearán automáticamente una cuenta en USD y otra en VES, visibles en Asignaciones.
+                  </span>
+                </label>
+              )}
 
               <div className="pt-3 border-t border-[#eaedff] flex items-center justify-end gap-2">
                 <button
@@ -693,10 +762,50 @@ export const PayrollScreen: React.FC = () => {
                   type="submit"
                   className="px-5 py-2.5 bg-[#0041c8] hover:bg-[#0036a8] text-white rounded-xl text-xs font-display font-bold shadow-md"
                 >
-                  Guardar Empleado
+                  {editingEmployeeId ? 'Guardar Cambios' : 'Guardar Empleado'}
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Confirm Delete Employee */}
+      {deleteConfirmEmployee && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#131b2e]/60 backdrop-blur-xs"
+          onClick={() => setDeleteConfirmEmployee(null)}
+        >
+          <div
+            className="w-full max-w-sm bg-white rounded-3xl p-6 border border-[#eaedff] shadow-2xl space-y-4 text-center"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="w-12 h-12 rounded-full bg-[#ffdadb] text-[#a20030] flex items-center justify-center mx-auto">
+              <Trash2 className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="font-display font-bold text-base text-[#131b2e]">¿Eliminar a {deleteConfirmEmployee.name}?</h3>
+              <p className="text-xs text-[#737688] mt-1">
+                Se borrarán sus préstamos y adelantos, y su acceso a la app dejará de funcionar. Su historial de nómina
+                y sus cuentas (si tenía) se conservan, pero quedan sin dueño asignado.
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setDeleteConfirmEmployee(null)}
+                className="flex-1 px-4 py-2.5 text-xs font-bold text-[#434656] hover:bg-[#f2f3ff] rounded-xl border border-[#eaedff]"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDeleteEmployee}
+                className="flex-1 px-4 py-2.5 bg-[#a20030] hover:bg-[#82002a] text-white rounded-xl text-xs font-display font-bold shadow-md"
+              >
+                Eliminar
+              </button>
+            </div>
           </div>
         </div>
       )}

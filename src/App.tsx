@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { Suspense, lazy } from 'react';
 import { AppProvider, useApp } from './context/AppContext';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { LoginScreen } from './screens/LoginScreen';
@@ -11,13 +11,22 @@ import { ReceiptTicketModal } from './components/ReceiptTicketModal';
 
 import { HomeScreen } from './screens/HomeScreen';
 import { MovementsScreen } from './screens/MovementsScreen';
-import { ChartsScreen } from './screens/ChartsScreen';
-import { PayrollScreen } from './screens/PayrollScreen';
-import { BudgetScreen } from './screens/BudgetScreen';
-import { ExchangeScreen } from './screens/ExchangeScreen';
-import { ProfileScreen } from './screens/ProfileScreen';
-import { TasksScreen } from './screens/TasksScreen';
-import { AssignmentsScreen } from './screens/AssignmentsScreen';
+
+// Loaded on demand — keeps the initial bundle small on slow phones/networks.
+// Charts/Assignments in particular pull in recharts, the heaviest dependency.
+const ChartsScreen = lazy(() => import('./screens/ChartsScreen').then((m) => ({ default: m.ChartsScreen })));
+const PayrollScreen = lazy(() => import('./screens/PayrollScreen').then((m) => ({ default: m.PayrollScreen })));
+const BudgetScreen = lazy(() => import('./screens/BudgetScreen').then((m) => ({ default: m.BudgetScreen })));
+const ExchangeScreen = lazy(() => import('./screens/ExchangeScreen').then((m) => ({ default: m.ExchangeScreen })));
+const ProfileScreen = lazy(() => import('./screens/ProfileScreen').then((m) => ({ default: m.ProfileScreen })));
+const TasksScreen = lazy(() => import('./screens/TasksScreen').then((m) => ({ default: m.TasksScreen })));
+const AssignmentsScreen = lazy(() => import('./screens/AssignmentsScreen').then((m) => ({ default: m.AssignmentsScreen })));
+
+const ScreenFallback: React.FC = () => (
+  <div className="flex items-center justify-center py-24">
+    <div className="w-6 h-6 border-2 border-[#eaedff] border-t-[#0041c8] rounded-full animate-spin" />
+  </div>
+);
 
 const MainLayout: React.FC = () => {
   const { currentTab, dataLoading, joinError } = useApp();
@@ -86,7 +95,7 @@ const MainLayout: React.FC = () => {
         {/* Main Content Area (this is the only part that scrolls) */}
         <main className="flex-1 min-w-0 h-full overflow-y-auto">
           <div className="max-w-7xl mx-auto w-full p-4 sm:p-6 lg:p-8">
-            {renderScreen()}
+            <Suspense fallback={<ScreenFallback />}>{renderScreen()}</Suspense>
           </div>
         </main>
       </div>
