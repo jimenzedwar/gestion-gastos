@@ -20,7 +20,8 @@ import {
   ShieldCheck,
   Copy,
   Pencil,
-  Trash2
+  Trash2,
+  ChevronDown
 } from 'lucide-react';
 
 export const PayrollScreen: React.FC = () => {
@@ -67,7 +68,7 @@ export const PayrollScreen: React.FC = () => {
   const [empNeedsAccount, setEmpNeedsAccount] = useState(false);
 
   // Form states: New Loan/Advance
-  const [loanEmpId, setLoanEmpId] = useState<string>(employees[0]?.id || '');
+  const [loanEmpId, setLoanEmpId] = useState<string>('');
   const [loanType, setLoanType] = useState<'advance' | 'loan'>('advance');
   const [loanAmount, setLoanAmount] = useState<number>(50);
   const [loanDeduction, setLoanDeduction] = useState<number>(25);
@@ -86,15 +87,20 @@ export const PayrollScreen: React.FC = () => {
   const [isMixedPayment, setIsMixedPayment] = useState<boolean>(false);
   const [secondaryPayrollAccountId, setSecondaryPayrollAccountId] = useState<string>(businessAccounts[0]?.id || '');
   const [secondaryPayrollAmount, setSecondaryPayrollAmount] = useState<number>(0);
+  const [showPayrollMoreOptions, setShowPayrollMoreOptions] = useState<boolean>(false);
+
+  // Nómina only manages employees who are actually on payroll — team members
+  // registered in Equipo (receivesPayroll === false) live there instead.
+  const payrollEmployees = employees.filter((e) => e.receivesPayroll !== false);
 
   // Summary KPIs
-  const totalEmployees = employees.length;
-  const totalMonthlyPayroll = employees.reduce((acc, e) => acc + e.monthlySalary, 0);
-  const activeLoans = employees.flatMap((e) => e.loans.filter((l) => l.status === 'active'));
+  const totalEmployees = payrollEmployees.length;
+  const totalMonthlyPayroll = payrollEmployees.reduce((acc, e) => acc + e.monthlySalary, 0);
+  const activeLoans = payrollEmployees.flatMap((e) => e.loans.filter((l) => l.status === 'active'));
   const totalOutstandingLoans = activeLoans.reduce((acc, l) => acc + l.remainingAmount, 0);
 
   // Filtered employees
-  const filteredEmployees = employees.filter((e) => {
+  const filteredEmployees = payrollEmployees.filter((e) => {
     if (!searchQuery.trim()) return true;
     const q = searchQuery.toLowerCase();
     return e.name.toLowerCase().includes(q) || e.position.toLowerCase().includes(q);
@@ -221,18 +227,14 @@ export const PayrollScreen: React.FC = () => {
       return;
     }
     const rateToUse = isCustomRate ? payrollRate : bcvRate;
-    const secondaryAccount = businessAccounts.find((a) => a.id === secondaryPayrollAccountId);
-    // The amount was typed in that account's own currency — convert to USD
-    // (what processPayrollPayment expects) before sending it.
-    const secondaryAmountUSD = secondaryAccount && secondaryAccount.currency === 'VES'
-      ? secondaryPayrollAmount / rateToUse
-      : secondaryPayrollAmount;
+    // secondaryPayrollAmount is always typed in USD — processPayrollPayment
+    // converts to the account's own currency internally when charging it.
     processPayrollPayment(
       processPayModal.id,
       payrollPeriod,
       payrollAccountId,
       rateToUse,
-      isMixedPayment ? { secondaryAccountId: secondaryPayrollAccountId, secondaryAmountUSD } : undefined
+      isMixedPayment ? { secondaryAccountId: secondaryPayrollAccountId, secondaryAmountUSD: secondaryPayrollAmount } : undefined
     );
     setProcessPayModal(null);
     setIsMixedPayment(false);
@@ -278,7 +280,10 @@ export const PayrollScreen: React.FC = () => {
 
         <div className="flex flex-wrap items-center gap-2">
           <button
-            onClick={() => setNewLoanModal(true)}
+            onClick={() => {
+              setLoanEmpId(payrollEmployees[0]?.id || '');
+              setNewLoanModal(true);
+            }}
             className="flex items-center gap-1.5 px-3 py-2 bg-white text-[#0041c8] border border-[#eaedff] rounded-xl text-xs font-bold shadow-xs hover:bg-[#eaedff] transition-all"
           >
             <HandCoins className="w-4 h-4 text-[#0041c8]" />
@@ -345,7 +350,7 @@ export const PayrollScreen: React.FC = () => {
               : 'bg-white text-[#434656] hover:bg-[#f2f3ff] border border-[#eaedff]'
           }`}
         >
-          Empleados ({employees.length})
+          Empleados ({payrollEmployees.length})
         </button>
 
         <button
@@ -493,6 +498,7 @@ export const PayrollScreen: React.FC = () => {
                                   setIsMixedPayment(false);
                                   setSecondaryPayrollAmount(0);
                                   setSecondaryPayrollAccountId(businessAccounts.find((a) => a.id !== defaultAccountId)?.id || businessAccounts[0]?.id || '');
+                                  setShowPayrollMoreOptions(false);
                                 }}
                                 className="py-1.5 px-2.5 bg-[#0041c8] hover:bg-[#0036a8] text-white rounded-lg text-[11px] font-bold whitespace-nowrap transition-colors"
                               >
@@ -829,7 +835,7 @@ export const PayrollScreen: React.FC = () => {
                   onChange={(e) => setLoanEmpId(e.target.value)}
                   className="w-full px-3 py-2 bg-[#f2f3ff] rounded-xl text-xs sm:text-sm font-semibold outline-none border border-transparent focus:border-[#0041c8]"
                 >
-                  {employees.map((e) => (
+                  {payrollEmployees.map((e) => (
                     <option key={e.id} value={e.id}>
                       {e.name} — Sueldo: ${e.monthlySalary}/mes ({e.paymentFrequency})
                     </option>
@@ -1028,18 +1034,17 @@ export const PayrollScreen: React.FC = () => {
       {/* Modal: Process Payroll Payment */}
       {processPayModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#131b2e]/60 backdrop-blur-xs" onClick={() => setProcessPayModal(null)}>
-          <div className="w-full max-w-lg bg-white rounded-3xl p-6 border border-[#eaedff] shadow-2xl space-y-4 max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+          <div className="w-full max-w-md bg-white rounded-3xl p-6 border border-[#eaedff] shadow-2xl space-y-4 max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between border-b border-[#eaedff] pb-3">
               <div>
-                <h3 className="font-display font-bold text-lg text-[#131b2e]">Liquidación de Nómina</h3>
-                <p className="text-xs text-[#0041c8] font-semibold">{processPayModal.name} · {processPayModal.position}</p>
+                <h3 className="font-display font-bold text-lg text-[#131b2e]">Pagar a {processPayModal.name}</h3>
+                <p className="text-xs text-[#737688]">{processPayModal.position}</p>
               </div>
               <button onClick={() => setProcessPayModal(null)} className="p-1 rounded-full hover:bg-[#f2f3ff]">
                 <X className="w-5 h-5 text-[#737688]" />
               </button>
             </div>
 
-            {/* Calculations Breakdown */}
             {(() => {
               const isQuincenal = processPayModal.paymentFrequency === 'quincenal';
               const baseSalary = isQuincenal ? processPayModal.monthlySalary / 2 : processPayModal.monthlySalary;
@@ -1053,7 +1058,9 @@ export const PayrollScreen: React.FC = () => {
               const isSourceUSD = !sourceAccount || sourceAccount.currency === 'USD';
               const secondaryAccount = isMixedPayment ? businessAccounts.find((a) => a.id === secondaryPayrollAccountId) : undefined;
               const isSecondaryUSD = !secondaryAccount || secondaryAccount.currency === 'USD';
-              const secondaryAmountUSD = isMixedPayment ? (isSecondaryUSD ? secondaryPayrollAmount : secondaryPayrollAmount / rateToUse) : 0;
+              // Always entered in USD — converted to the account's own currency only
+              // when charging it (below), never the other way around.
+              const secondaryAmountUSD = isMixedPayment ? secondaryPayrollAmount : 0;
               const primaryAmountUSD = Math.max(0, netUSD - secondaryAmountUSD);
               const primaryChargeAmount = isSourceUSD ? primaryAmountUSD : primaryAmountUSD * rateToUse;
               const secondaryChargeAmount = secondaryAccount ? (isSecondaryUSD ? secondaryAmountUSD : secondaryAmountUSD * rateToUse) : 0;
@@ -1064,164 +1071,154 @@ export const PayrollScreen: React.FC = () => {
 
               return (
                 <div className="space-y-4">
-                  {/* Calculation Card */}
-                  <div className="p-4 bg-[#faf8ff] rounded-2xl border border-[#eaedff] space-y-2.5 text-xs">
-                    <div className="flex justify-between text-[#434656]">
-                      <span>Salario Base ({isQuincenal ? 'Quincenal' : 'Mensual'}):</span>
-                      <strong className="text-[#131b2e] font-display text-sm">${baseSalary.toFixed(2)} USD</strong>
+                  {/* Big, simple total — the one number that matters */}
+                  <div className="text-center py-2">
+                    <div className="font-display text-3xl font-extrabold text-[#0041c8]">
+                      ${netUSD.toFixed(2)}
                     </div>
-
-                    {totalDeduction > 0 ? (
-                      <div className="flex justify-between text-[#dc2626] font-semibold">
-                        <span>Deducción por Préstamos/Adelantos:</span>
-                        <span>-${totalDeduction.toFixed(2)} USD</span>
-                      </div>
-                    ) : (
-                      <div className="flex justify-between text-[#006c49]">
-                        <span>Deducción por Préstamos:</span>
-                        <span>$0.00 (Sin deudas activas)</span>
+                    <div className="text-xs font-bold text-[#006c49] mt-0.5">
+                      ≈ Bs. {netVES.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </div>
+                    {totalDeduction > 0 && (
+                      <div className="text-[11px] text-[#737688] mt-1.5">
+                        Sueldo ${baseSalary.toFixed(2)} − Préstamo/adelanto ${totalDeduction.toFixed(2)}
                       </div>
                     )}
-
-                    <div className="pt-2 border-t border-[#eaedff] flex items-baseline justify-between">
-                      <span className="font-bold text-sm text-[#131b2e]">Neto a Pagar:</span>
-                      <div className="text-right">
-                        <span className="font-display text-xl font-extrabold text-[#0041c8] block">
-                          ${netUSD.toFixed(2)} USD
-                        </span>
-                        <span className="text-xs font-bold text-[#006c49]">
-                          ≈ Bs. {netVES.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                        </span>
-                      </div>
-                    </div>
                   </div>
 
-                  {/* Flexible Rate Configuration (Requested: no tiene que estar anclada a la del bcv) */}
-                  <div className="p-3 bg-[#f2f3ff] rounded-xl border border-[#eaedff] space-y-2">
-                    <div className="flex items-center justify-between text-xs">
-                      <span className="font-bold text-[#131b2e]">Tasa de Conversión para Nómina:</span>
-                      <button
-                        type="button"
-                        onClick={() => setIsCustomRate(!isCustomRate)}
-                        className="text-[11px] text-[#0041c8] font-bold hover:underline"
-                      >
-                        {isCustomRate ? 'Volver a Tasa BCV' : 'Modificar Tasa'}
-                      </button>
-                    </div>
-
-                    <div className="flex items-center gap-2">
-                      <div className="flex-1">
-                        <input
-                          type="number"
-                          step="any"
-                          disabled={!isCustomRate}
-                          value={isCustomRate ? payrollRate : bcvRate}
-                          onChange={(e) => setPayrollRate(parseFloat(e.target.value) || bcvRate)}
-                          className={`w-full px-3 py-1.5 rounded-lg text-xs font-bold ${
-                            isCustomRate ? 'bg-white border border-[#0041c8] text-[#131b2e]' : 'bg-[#eaedff] text-[#737688]'
-                          }`}
-                        />
-                      </div>
-                      <span className="text-xs font-semibold text-[#434656]">Bs./USD</span>
-                    </div>
+                  {/* Account — the one choice everyone needs to make */}
+                  <div>
+                    <label className="text-xs font-semibold text-[#434656] block mb-1">Pagar desde</label>
+                    <select
+                      value={payrollAccountId}
+                      onChange={(e) => setPayrollAccountId(e.target.value)}
+                      className={`w-full px-3 py-2 bg-[#f2f3ff] rounded-xl text-xs font-semibold outline-none border ${insufficientPrimary ? 'border-[#ca1c43]' : 'border-transparent'} focus:border-[#0041c8]`}
+                    >
+                      {businessAccounts.map((a) => (
+                        <option key={a.id} value={a.id}>
+                          {a.name} ({a.currency === 'USD' ? formatUSD(a.balance) : formatVES(a.balance)})
+                        </option>
+                      ))}
+                    </select>
+                    {insufficientPrimary && sourceAccount && (
+                      <p className="text-[11px] font-semibold text-[#a20030] mt-1">
+                        Saldo insuficiente: {sourceAccount.name} tiene {isSourceUSD ? formatUSD(sourceAccount.balance) : formatVES(sourceAccount.balance)}
+                        {' '}y se necesitan {isSourceUSD ? formatUSD(primaryChargeAmount) : formatVES(primaryChargeAmount)}.
+                      </p>
+                    )}
                   </div>
 
-                  {/* Period and Account */}
-                  <div className="space-y-3">
-                    <div>
-                      <label className="text-xs font-semibold text-[#434656] block mb-1">Concepto / Periodo</label>
-                      <input
-                        type="text"
-                        value={payrollPeriod}
-                        onChange={(e) => setPayrollPeriod(e.target.value)}
-                        className="w-full px-3 py-2 bg-[#f2f3ff] rounded-xl text-xs font-semibold outline-none border border-transparent focus:border-[#0041c8]"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="text-xs font-semibold text-[#434656] block mb-1">
-                        {isMixedPayment ? 'Cuenta principal (resto del pago)' : 'Pagar desde Cuenta de la Empresa'}
-                      </label>
-                      <select
-                        value={payrollAccountId}
-                        onChange={(e) => setPayrollAccountId(e.target.value)}
-                        className={`w-full px-3 py-2 bg-[#f2f3ff] rounded-xl text-xs font-semibold outline-none border ${insufficientPrimary ? 'border-[#ca1c43]' : 'border-transparent'} focus:border-[#0041c8]`}
-                      >
-                        {businessAccounts.map((a) => (
-                          <option key={a.id} value={a.id}>
-                            {a.name} ({a.currency === 'USD' ? formatUSD(a.balance) : formatVES(a.balance)})
-                          </option>
-                        ))}
-                      </select>
-                      {insufficientPrimary && sourceAccount && (
-                        <p className="text-[11px] font-semibold text-[#a20030] mt-1">
-                          Saldo insuficiente: {sourceAccount.name} tiene {isSourceUSD ? formatUSD(sourceAccount.balance) : formatVES(sourceAccount.balance)}
-                          {' '}y se necesitan {isSourceUSD ? formatUSD(primaryChargeAmount) : formatVES(primaryChargeAmount)}.
-                        </p>
-                      )}
-                    </div>
-
+                  {/* Everything else, tucked away by default */}
+                  <div className="border-t border-[#eaedff] pt-3">
                     <button
                       type="button"
-                      onClick={() => setIsMixedPayment(!isMixedPayment)}
-                      className="text-[11px] text-[#0041c8] font-bold hover:underline"
+                      onClick={() => setShowPayrollMoreOptions(!showPayrollMoreOptions)}
+                      className="w-full flex items-center justify-between text-xs font-bold text-[#0041c8]"
                     >
-                      {isMixedPayment ? '× Quitar pago mixto' : '+ Pagar mixto (ej. parte en efectivo, parte en Bs.)'}
+                      <span>Más opciones (tasa, periodo, pago mixto)</span>
+                      <ChevronDown className={`w-4 h-4 transition-transform ${showPayrollMoreOptions ? 'rotate-180' : ''}`} />
                     </button>
 
-                    {isMixedPayment && (() => {
-                      const secondaryMaxNative = isSecondaryUSD ? netUSD : netUSD * rateToUse;
+                    {showPayrollMoreOptions && (
+                      <div className="space-y-3 mt-3">
+                        <div>
+                          <label className="text-xs font-semibold text-[#434656] block mb-1">Concepto / Periodo</label>
+                          <input
+                            type="text"
+                            value={payrollPeriod}
+                            onChange={(e) => setPayrollPeriod(e.target.value)}
+                            className="w-full px-3 py-2 bg-[#f2f3ff] rounded-xl text-xs font-semibold outline-none border border-transparent focus:border-[#0041c8]"
+                          />
+                        </div>
 
-                      return (
-                        <div className="p-3 bg-[#f2f3ff] rounded-xl border border-[#eaedff] space-y-3">
-                          <div>
-                            <label className="text-xs font-semibold text-[#434656] block mb-1">Segunda cuenta</label>
-                            <select
-                              value={secondaryPayrollAccountId}
-                              onChange={(e) => {
-                                setSecondaryPayrollAccountId(e.target.value);
-                                setSecondaryPayrollAmount(0);
-                              }}
-                              className={`w-full px-3 py-2 bg-white rounded-xl text-xs font-semibold outline-none border ${insufficientSecondary ? 'border-[#ca1c43]' : 'border-transparent'} focus:border-[#0041c8]`}
+                        <div className="p-3 bg-[#f2f3ff] rounded-xl border border-[#eaedff] space-y-2">
+                          <div className="flex items-center justify-between text-xs">
+                            <span className="font-bold text-[#131b2e]">Tasa de conversión:</span>
+                            <button
+                              type="button"
+                              onClick={() => setIsCustomRate(!isCustomRate)}
+                              className="text-[11px] text-[#0041c8] font-bold hover:underline"
                             >
-                              {businessAccounts.filter((a) => a.id !== payrollAccountId).map((a) => (
-                                <option key={a.id} value={a.id}>
-                                  {a.name} ({a.currency === 'USD' ? formatUSD(a.balance) : formatVES(a.balance)})
-                                </option>
-                              ))}
-                            </select>
+                              {isCustomRate ? 'Volver a Tasa BCV' : 'Usar otra tasa'}
+                            </button>
                           </div>
-                          <div>
-                            <label className="text-xs font-semibold text-[#434656] block mb-1">
-                              Monto a pagar desde esa cuenta ({isSecondaryUSD ? 'USD' : 'Bs.'})
-                            </label>
+                          <div className="flex items-center gap-2">
                             <input
                               type="number"
-                              min="0"
-                              max={secondaryMaxNative}
                               step="any"
-                              value={secondaryPayrollAmount || ''}
-                              onChange={(e) => setSecondaryPayrollAmount(Math.min(parseFloat(e.target.value) || 0, secondaryMaxNative))}
-                              className="w-full px-3 py-2 bg-white rounded-xl text-xs font-bold outline-none border border-transparent focus:border-[#0041c8]"
+                              disabled={!isCustomRate}
+                              value={isCustomRate ? payrollRate : bcvRate}
+                              onChange={(e) => setPayrollRate(parseFloat(e.target.value) || bcvRate)}
+                              className={`flex-1 px-3 py-1.5 rounded-lg text-xs font-bold ${
+                                isCustomRate ? 'bg-white border border-[#0041c8] text-[#131b2e]' : 'bg-[#eaedff] text-[#737688]'
+                              }`}
                             />
+                            <span className="text-xs font-semibold text-[#434656]">Bs./USD</span>
                           </div>
-                          <div className="text-[11px] text-[#434656] pt-1 border-t border-[#eaedff]">
-                            Cuenta principal: <strong>${primaryAmountUSD.toFixed(2)}</strong> · Segunda cuenta:{' '}
-                            <strong>{isSecondaryUSD ? `$${secondaryPayrollAmount.toFixed(2)}` : `Bs. ${secondaryPayrollAmount.toLocaleString('es-VE', { maximumFractionDigits: 2 })}`}</strong>
-                            {' '}(≈ ${secondaryAmountUSD.toFixed(2)})
-                          </div>
-                          {insufficientSecondary && secondaryAccount && (
-                            <p className="text-[11px] font-semibold text-[#a20030]">
-                              Saldo insuficiente: {secondaryAccount.name} tiene {isSecondaryUSD ? formatUSD(secondaryAccount.balance) : formatVES(secondaryAccount.balance)}
-                              {' '}y se necesitan {isSecondaryUSD ? formatUSD(secondaryChargeAmount) : formatVES(secondaryChargeAmount)}.
-                            </p>
-                          )}
                         </div>
-                      );
-                    })()}
+
+                        <button
+                          type="button"
+                          onClick={() => setIsMixedPayment(!isMixedPayment)}
+                          className="text-[11px] text-[#0041c8] font-bold hover:underline"
+                        >
+                          {isMixedPayment ? '× Quitar pago mixto' : '+ Pagar mixto (parte en otra cuenta)'}
+                        </button>
+
+                        {isMixedPayment && (
+                          <div className="p-3 bg-[#f2f3ff] rounded-xl border border-[#eaedff] space-y-3">
+                            <div>
+                              <label className="text-xs font-semibold text-[#434656] block mb-1">Segunda cuenta</label>
+                              <select
+                                value={secondaryPayrollAccountId}
+                                onChange={(e) => {
+                                  setSecondaryPayrollAccountId(e.target.value);
+                                  setSecondaryPayrollAmount(0);
+                                }}
+                                className={`w-full px-3 py-2 bg-white rounded-xl text-xs font-semibold outline-none border ${insufficientSecondary ? 'border-[#ca1c43]' : 'border-transparent'} focus:border-[#0041c8]`}
+                              >
+                                {businessAccounts.filter((a) => a.id !== payrollAccountId).map((a) => (
+                                  <option key={a.id} value={a.id}>
+                                    {a.name} ({a.currency === 'USD' ? formatUSD(a.balance) : formatVES(a.balance)})
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                            <div>
+                              <label className="text-xs font-semibold text-[#434656] block mb-1">
+                                Monto a pagar desde esa cuenta (USD)
+                              </label>
+                              <input
+                                type="number"
+                                min="0"
+                                max={netUSD}
+                                step="any"
+                                value={secondaryPayrollAmount || ''}
+                                onChange={(e) => setSecondaryPayrollAmount(Math.min(parseFloat(e.target.value) || 0, netUSD))}
+                                className="w-full px-3 py-2 bg-white rounded-xl text-xs font-bold outline-none border border-transparent focus:border-[#0041c8]"
+                              />
+                              {!isSecondaryUSD && (
+                                <p className="text-[11px] text-[#006c49] font-semibold mt-1">
+                                  ≈ Bs. {secondaryChargeAmount.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                </p>
+                              )}
+                            </div>
+                            <div className="text-[11px] text-[#434656] pt-1 border-t border-[#eaedff]">
+                              Cuenta principal: <strong>${primaryAmountUSD.toFixed(2)}</strong> · Segunda cuenta: <strong>${secondaryPayrollAmount.toFixed(2)}</strong>
+                            </div>
+                            {insufficientSecondary && secondaryAccount && (
+                              <p className="text-[11px] font-semibold text-[#a20030]">
+                                Saldo insuficiente: {secondaryAccount.name} tiene {isSecondaryUSD ? formatUSD(secondaryAccount.balance) : formatVES(secondaryAccount.balance)}
+                                {' '}y se necesitan {isSecondaryUSD ? formatUSD(secondaryChargeAmount) : formatVES(secondaryChargeAmount)}.
+                              </p>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
 
-                  <div className="pt-3 border-t border-[#eaedff] flex items-center justify-end gap-2">
+                  <div className="pt-1 flex items-center justify-end gap-2">
                     <button
                       type="button"
                       onClick={() => setProcessPayModal(null)}
@@ -1235,7 +1232,7 @@ export const PayrollScreen: React.FC = () => {
                       disabled={hasInsufficientBalance}
                       className="px-5 py-2.5 bg-[#0041c8] hover:bg-[#0036a8] disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-xl text-xs font-display font-bold shadow-md"
                     >
-                      {hasInsufficientBalance ? 'Saldo insuficiente' : 'Confirmar y Liquidar Pago'}
+                      {hasInsufficientBalance ? 'Saldo insuficiente' : `Pagar $${netUSD.toFixed(2)}`}
                     </button>
                   </div>
                 </div>

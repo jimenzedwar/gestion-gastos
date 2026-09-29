@@ -82,6 +82,10 @@ export interface Employee {
   pagoMovilBank?: string;
   loans: EmployeeLoan[];
   status: 'active' | 'inactive';
+  // false = a team member registered in Equipo, not on payroll (no salary/loans/
+  // payroll payments — they can still get accounts and receive asignaciones).
+  // Missing/true = a regular Nómina employee.
+  receivesPayroll?: boolean;
   // App access (optional — most employees are payroll-only records)
   authUserId?: string;
   assignedAccountId?: string;

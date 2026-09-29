@@ -418,3 +418,9 @@ create policy "employee inserts own account transactions" on public.transactions
       (select exchange_counterpart_account_id from public.current_employee())
     )
   );
+
+-- ============================================================================
+-- Equipo: personas del equipo que no están en nómina (sin sueldo/préstamos),
+-- pero que igual pueden tener cuentas propias y recibir asignaciones.
+-- ============================================================================
+alter table public.employees add column if not exists receives_payroll boolean not null default true;

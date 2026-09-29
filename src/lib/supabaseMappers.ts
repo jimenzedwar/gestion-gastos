@@ -105,6 +105,7 @@ export function employeeToDb(e: Omit<Employee, 'loans'>, userId: string) {
     payment_method: e.paymentMethod,
     pago_movil_bank: e.pagoMovilBank ?? null,
     status: e.status,
+    receives_payroll: e.receivesPayroll !== false,
     assigned_account_id: e.assignedAccountId ?? null,
     exchange_counterpart_account_id: e.exchangeCounterpartAccountId ?? null
   };
@@ -122,6 +123,7 @@ export function employeeFromDb(row: any, loans: EmployeeLoan[]): Employee {
     paymentMethod: row.payment_method,
     pagoMovilBank: row.pago_movil_bank ?? undefined,
     status: row.status,
+    receivesPayroll: row.receives_payroll ?? true,
     authUserId: row.auth_user_id ?? undefined,
     assignedAccountId: row.assigned_account_id ?? undefined,
     exchangeCounterpartAccountId: row.exchange_counterpart_account_id ?? undefined,

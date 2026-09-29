@@ -167,7 +167,7 @@ export const AssignmentsScreen: React.FC = () => {
           <div className="text-3xl">👤</div>
           <h3 className="font-display font-bold text-base text-[#131b2e]">Ningún empleado tiene cuenta todavía</h3>
           <p className="text-xs text-[#737688] max-w-sm mx-auto">
-            Ve a Nómina → Registrar Empleado y marca "¿Este empleado necesita una cuenta para gastos?" para que aparezca aquí.
+            Ve a Nómina o Equipo, registra a la persona y marca "¿Necesita una cuenta para gastos?" para que aparezca aquí.
           </p>
         </div>
       </div>

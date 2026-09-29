@@ -21,6 +21,7 @@ const ExchangeScreen = lazy(() => import('./screens/ExchangeScreen').then((m) =>
 const ProfileScreen = lazy(() => import('./screens/ProfileScreen').then((m) => ({ default: m.ProfileScreen })));
 const TasksScreen = lazy(() => import('./screens/TasksScreen').then((m) => ({ default: m.TasksScreen })));
 const AssignmentsScreen = lazy(() => import('./screens/AssignmentsScreen').then((m) => ({ default: m.AssignmentsScreen })));
+const TeamScreen = lazy(() => import('./screens/TeamScreen').then((m) => ({ default: m.TeamScreen })));
 
 const ScreenFallback: React.FC = () => (
   <div className="flex items-center justify-center py-24">
@@ -69,6 +70,8 @@ const MainLayout: React.FC = () => {
         return <ChartsScreen />;
       case 'nomina':
         return <PayrollScreen />;
+      case 'equipo':
+        return <TeamScreen />;
       case 'asignaciones':
         return <AssignmentsScreen />;
       case 'presupuesto':
