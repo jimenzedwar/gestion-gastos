@@ -1,5 +1,6 @@
 import React from 'react';
 import { useApp } from '../context/AppContext';
+import { BusinessSwitcher } from './BusinessSwitcher';
 import {
   Home,
   ReceiptText,
@@ -39,6 +40,13 @@ export const Sidebar: React.FC = () => {
 
   return (
     <aside className="w-64 bg-[#f2f3ff] border-r border-[#eaedff] flex flex-col p-6 shrink-0 min-h-screen">
+      {/* Business switcher — owner only, never shown to employees */}
+      {role === 'owner' && (
+        <div className="mb-3">
+          <BusinessSwitcher />
+        </div>
+      )}
+
       {/* Quick action trigger */}
       <div className="mb-5">
         <button

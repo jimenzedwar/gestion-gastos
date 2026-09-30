@@ -89,6 +89,10 @@ export const PayrollScreen: React.FC = () => {
   const [secondaryPayrollAmount, setSecondaryPayrollAmount] = useState<number>(0);
   const [showPayrollMoreOptions, setShowPayrollMoreOptions] = useState<boolean>(false);
 
+  // Renders the payroll history a page at a time instead of the whole list.
+  const HISTORY_PAGE_SIZE = 20;
+  const [visibleHistoryCount, setVisibleHistoryCount] = useState(HISTORY_PAGE_SIZE);
+
   // Nómina only manages employees who are actually on payroll — team members
   // registered in Equipo (receivesPayroll === false) live there instead.
   const payrollEmployees = employees.filter((e) => e.receivesPayroll !== false);
@@ -624,7 +628,7 @@ export const PayrollScreen: React.FC = () => {
           </div>
 
           <div className="divide-y divide-[#eaedff]">
-            {payrollHistory.map((item) => (
+            {payrollHistory.slice(0, visibleHistoryCount).map((item) => (
               <div key={item.id} className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-[#faf8ff]">
                 <div>
                   <div className="flex items-center gap-2">
@@ -662,6 +666,16 @@ export const PayrollScreen: React.FC = () => {
               </div>
             ))}
           </div>
+
+          {visibleHistoryCount < payrollHistory.length && (
+            <button
+              type="button"
+              onClick={() => setVisibleHistoryCount((c) => c + HISTORY_PAGE_SIZE)}
+              className="w-full py-2.5 border-t border-[#eaedff] text-xs font-bold text-[#0041c8] hover:bg-[#f2f3ff] transition-colors"
+            >
+              Cargar más recibos
+            </button>
+          )}
         </div>
       )}
 

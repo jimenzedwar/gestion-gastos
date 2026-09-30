@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
+import { BusinessSwitcher } from './BusinessSwitcher';
 import {
   Home,
   ReceiptText,
@@ -59,13 +60,15 @@ export const BottomNav: React.FC = () => {
           >
             <div className="flex items-center justify-between border-b border-[#f2f3ff] pb-3">
               <span className="font-display font-bold text-sm text-[#131b2e]">Menú de Operaciones</span>
-              <button 
+              <button
                 onClick={() => setMoreMenuOpen(false)}
                 className="w-8 h-8 rounded-full bg-[#f2f3ff] flex items-center justify-center text-[#737688]"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
+
+            {role === 'owner' && <BusinessSwitcher />}
 
             <div className="grid grid-cols-2 gap-2.5">
               {moreItems.map((item) => {

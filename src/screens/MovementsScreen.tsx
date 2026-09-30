@@ -1,23 +1,28 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import { Transaction, Currency, TransactionType } from '../types';
-import { 
-  Search, 
-  Filter, 
-  Plus, 
-  Receipt, 
-  ArrowUpRight, 
-  ArrowDownLeft, 
-  Repeat, 
-  Copy, 
-  Check, 
-  Share2, 
+import {
+  Search,
+  Filter,
+  Plus,
+  Receipt,
+  ArrowUpRight,
+  ArrowDownLeft,
+  Repeat,
+  Copy,
+  Check,
+  Share2,
   Building2,
   Calendar,
   CreditCard,
   Hash,
-  Sparkles
+  Sparkles,
+  ChevronDown
 } from 'lucide-react';
+
+// Rendering hundreds of rows at once is what actually makes a long history
+// feel sluggish — show a page at a time and reveal more on demand instead.
+const PAGE_SIZE = 40;
 
 export const MovementsScreen: React.FC = () => {
   const {
@@ -31,13 +36,23 @@ export const MovementsScreen: React.FC = () => {
     openQuickIncome,
     showToast,
     formatUSD,
-    formatVES
+    formatVES,
+    hasMoreTransactions,
+    loadingMoreTransactions,
+    loadMoreTransactions
   } = useApp();
 
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCurrency, setSelectedCurrency] = useState<'ALL' | Currency>('ALL');
   const [selectedType, setSelectedType] = useState<'ALL' | TransactionType>('ALL');
   const [selectedAccount, setSelectedAccount] = useState<string>('ALL');
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+
+  // Any change in filters starts the page over — otherwise a previously
+  // revealed count from a totally different filtered view carries over.
+  useEffect(() => {
+    setVisibleCount(PAGE_SIZE);
+  }, [searchQuery, selectedCurrency, selectedType, selectedAccount]);
 
   // Filtered transactions
   const filteredTransactions = useMemo(() => {
@@ -71,16 +86,40 @@ export const MovementsScreen: React.FC = () => {
     });
   }, [transactions, searchQuery, selectedCurrency, selectedType, selectedAccount]);
 
+  // Only the current page is actually grouped/rendered — filters still run
+  // over the full loaded set above, just the DOM output is capped.
+  const visibleTransactions = useMemo(
+    () => filteredTransactions.slice(0, visibleCount),
+    [filteredTransactions, visibleCount]
+  );
+
   // Group by date
   const groupedTransactions = useMemo<Record<string, Transaction[]>>(() => {
     const groups: Record<string, Transaction[]> = {};
-    filteredTransactions.forEach((tx) => {
+    visibleTransactions.forEach((tx) => {
       const groupKey = tx.groupDate || 'HOY';
       if (!groups[groupKey]) groups[groupKey] = [];
       groups[groupKey].push(tx);
     });
     return groups;
-  }, [filteredTransactions]);
+  }, [visibleTransactions]);
+
+  const filtersActive = !!searchQuery.trim() || selectedCurrency !== 'ALL' || selectedType !== 'ALL' || selectedAccount !== 'ALL';
+  const moreLoadedLocally = visibleCount < filteredTransactions.length;
+  // Fetching more from the server only makes sense with no filters active —
+  // otherwise we can't know whether the next page would even match them.
+  const canFetchMoreFromServer = !filtersActive && hasMoreTransactions;
+
+  const handleShowMore = async () => {
+    if (moreLoadedLocally) {
+      setVisibleCount((c) => c + PAGE_SIZE);
+      return;
+    }
+    if (canFetchMoreFromServer) {
+      await loadMoreTransactions();
+      setVisibleCount((c) => c + PAGE_SIZE);
+    }
+  };
 
   // Summary metrics computed from the real transaction history
   const metrics = useMemo(() => {
@@ -366,6 +405,24 @@ export const MovementsScreen: React.FC = () => {
                 </div>
               );
             })
+          )}
+
+          {(moreLoadedLocally || canFetchMoreFromServer) && (
+            <button
+              type="button"
+              onClick={handleShowMore}
+              disabled={loadingMoreTransactions}
+              className="w-full py-2.5 flex items-center justify-center gap-1.5 bg-white border border-[#eaedff] rounded-2xl text-xs font-bold text-[#0041c8] hover:bg-[#f2f3ff] disabled:opacity-60 transition-colors"
+            >
+              <ChevronDown className="w-3.5 h-3.5" />
+              <span>{loadingMoreTransactions ? 'Cargando...' : 'Cargar más movimientos'}</span>
+            </button>
+          )}
+
+          {!moreLoadedLocally && !canFetchMoreFromServer && filtersActive && hasMoreTransactions && (
+            <p className="text-[11px] text-[#737688] text-center">
+              Puede haber más historial — quita los filtros para seguir cargándolo.
+            </p>
           )}
         </div>
 

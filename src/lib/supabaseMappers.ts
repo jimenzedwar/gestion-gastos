@@ -1,9 +1,26 @@
-import { Account, Transaction, Employee, EmployeeLoan, PayrollPayment, RecurringExpense, Task } from '../types';
+import { Account, Transaction, Employee, EmployeeLoan, PayrollPayment, RecurringExpense, Task, Business } from '../types';
+
+export function businessToDb(b: Business, userId: string) {
+  return {
+    id: b.id,
+    user_id: userId,
+    name: b.name
+  };
+}
+
+export function businessFromDb(row: any): Business {
+  return {
+    id: row.id,
+    name: row.name,
+    createdAt: row.created_at
+  };
+}
 
 export function accountToDb(a: Account, userId: string) {
   return {
     id: a.id,
     user_id: userId,
+    business_id: a.businessId,
     name: a.name,
     type: a.type,
     currency: a.currency,
@@ -23,6 +40,10 @@ export function accountToDb(a: Account, userId: string) {
 export function accountFromDb(row: any): Account {
   return {
     id: row.id,
+    // Fallback to user_id so rows fetched before the business_id migration
+    // ran still resolve to the implicit "personal" business instead of
+    // vanishing from view.
+    businessId: row.business_id ?? row.user_id,
     name: row.name,
     type: row.type,
     currency: row.currency,
@@ -43,6 +64,7 @@ export function transactionToDb(t: Transaction, userId: string) {
   return {
     id: t.id,
     user_id: userId,
+    business_id: t.businessId,
     title: t.title,
     category: t.category,
     category_emoji: t.categoryEmoji ?? null,
@@ -69,6 +91,7 @@ export function transactionToDb(t: Transaction, userId: string) {
 export function transactionFromDb(row: any): Transaction {
   return {
     id: row.id,
+    businessId: row.business_id ?? row.user_id,
     title: row.title,
     category: row.category,
     categoryEmoji: row.category_emoji ?? undefined,
@@ -96,6 +119,7 @@ export function employeeToDb(e: Omit<Employee, 'loans'>, userId: string) {
   return {
     id: e.id,
     user_id: userId,
+    business_id: e.businessId,
     name: e.name,
     position: e.position,
     ci: e.ci ?? null,
@@ -114,6 +138,7 @@ export function employeeToDb(e: Omit<Employee, 'loans'>, userId: string) {
 export function employeeFromDb(row: any, loans: EmployeeLoan[]): Employee {
   return {
     id: row.id,
+    businessId: row.business_id ?? row.user_id,
     name: row.name,
     position: row.position,
     ci: row.ci ?? undefined,
@@ -135,6 +160,7 @@ export function loanToDb(l: EmployeeLoan, userId: string) {
   return {
     id: l.id,
     user_id: userId,
+    business_id: l.businessId,
     employee_id: l.employeeId,
     type: l.type,
     description: l.description,
@@ -149,6 +175,7 @@ export function loanToDb(l: EmployeeLoan, userId: string) {
 export function loanFromDb(row: any): EmployeeLoan {
   return {
     id: row.id,
+    businessId: row.business_id ?? row.user_id,
     employeeId: row.employee_id,
     type: row.type,
     description: row.description,
@@ -164,6 +191,7 @@ export function payrollToDb(p: PayrollPayment, userId: string) {
   return {
     id: p.id,
     user_id: userId,
+    business_id: p.businessId,
     employee_id: p.employeeId,
     employee_name: p.employeeName,
     period: p.period,
@@ -184,6 +212,7 @@ export function payrollToDb(p: PayrollPayment, userId: string) {
 export function payrollFromDb(row: any): PayrollPayment {
   return {
     id: row.id,
+    businessId: row.business_id ?? row.user_id,
     employeeId: row.employee_id,
     employeeName: row.employee_name,
     period: row.period,
@@ -205,6 +234,7 @@ export function recurringToDb(r: RecurringExpense, userId: string) {
   return {
     id: r.id,
     user_id: userId,
+    business_id: r.businessId,
     name: r.name,
     category: r.category,
     category_emoji: r.categoryEmoji ?? null,
@@ -221,6 +251,7 @@ export function recurringToDb(r: RecurringExpense, userId: string) {
 export function recurringFromDb(row: any): RecurringExpense {
   return {
     id: row.id,
+    businessId: row.business_id ?? row.user_id,
     name: row.name,
     category: row.category,
     categoryEmoji: row.category_emoji,
@@ -238,6 +269,7 @@ export function taskToDb(t: Task, userId: string) {
   return {
     id: t.id,
     user_id: userId,
+    business_id: t.businessId,
     assigned_employee_id: t.assignedEmployeeId ?? null,
     title: t.title,
     description: t.description ?? null,
@@ -250,6 +282,7 @@ export function taskToDb(t: Task, userId: string) {
 export function taskFromDb(row: any): Task {
   return {
     id: row.id,
+    businessId: row.business_id ?? row.user_id,
     assignedEmployeeId: row.assigned_employee_id ?? undefined,
     title: row.title,
     description: row.description ?? undefined,

@@ -2,8 +2,19 @@ export type Currency = 'USD' | 'VES';
 
 export type TransactionType = 'expense' | 'income' | 'exchange';
 
+// A "negocio" — a separate bucket of accounts/employees/etc. the owner can
+// switch between without logging out. The owner's original data lives under
+// the implicit "personal" business (id === their own auth user id), which
+// never appears in this table.
+export interface Business {
+  id: string;
+  name: string;
+  createdAt: string;
+}
+
 export interface Account {
   id: string;
+  businessId: string;
   name: string;
   type: 'usd_wallet' | 'ves_bank' | 'cash_usd' | 'cash_ves' | 'vault';
   currency: Currency;
@@ -21,6 +32,7 @@ export interface Account {
 
 export interface Transaction {
   id: string;
+  businessId: string;
   title: string;
   category: string;
   categoryEmoji?: string;
@@ -60,6 +72,7 @@ export interface CashBreakdown {
 
 export interface EmployeeLoan {
   id: string;
+  businessId: string;
   employeeId: string;
   type: 'advance' | 'loan'; // Adelanto de quincena o Préstamo
   description: string;
@@ -72,6 +85,7 @@ export interface EmployeeLoan {
 
 export interface Employee {
   id: string;
+  businessId: string;
   name: string;
   position: string;
   ci?: string;
@@ -94,6 +108,7 @@ export interface Employee {
 
 export interface PayrollPayment {
   id: string;
+  businessId: string;
   employeeId: string;
   employeeName: string;
   period: string;
@@ -113,6 +128,7 @@ export interface PayrollPayment {
 
 export interface RecurringExpense {
   id: string;
+  businessId: string;
   name: string;
   category: string;
   categoryEmoji: string;
@@ -130,6 +146,7 @@ export type TaskStatus = 'pendiente' | 'en_progreso' | 'completada';
 
 export interface Task {
   id: string;
+  businessId: string;
   assignedEmployeeId?: string;
   title: string;
   description?: string;

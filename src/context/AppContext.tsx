@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useMemo, useEffect } from 'react';
-import { Account, Transaction, Currency, Employee, EmployeeLoan, PayrollPayment, RecurringExpense, Task, TaskPriority } from '../types';
+import { Account, Transaction, Currency, Employee, EmployeeLoan, PayrollPayment, RecurringExpense, Task, TaskPriority, Business } from '../types';
 import { supabase, PENDING_INVITE_STORAGE_KEY } from '../lib/supabaseClient';
 import { compressImage } from '../lib/imageCompression';
 import { useAuth } from './AuthContext';
@@ -17,14 +17,20 @@ import {
   recurringToDb,
   recurringFromDb,
   taskToDb,
-  taskFromDb
+  taskFromDb,
+  businessToDb,
+  businessFromDb
 } from '../lib/supabaseMappers';
+
+const ACTIVE_BUSINESS_STORAGE_PREFIX = 'monedero_active_business_';
 
 // Public, no-key exchange rate API for Venezuela's official (BCV) rates
 const BCV_USD_ENDPOINT = 'https://ve.dolarapi.com/v1/dolares/oficial';
 const BCV_EUR_ENDPOINT = 'https://ve.dolarapi.com/v1/euros/oficial';
 const RATE_REFRESH_MS = 30 * 60 * 1000; // 30 minutes
 const RECEIPTS_BUCKET = 'receipts';
+const TRANSACTIONS_INITIAL_LIMIT = 500;
+const TRANSACTIONS_PAGE_SIZE = 200;
 
 // Date.now() alone can collide when two records are created in the same
 // millisecond (e.g. provisioning both an employee's accounts back to back,
@@ -47,17 +53,25 @@ interface AppContextType {
   businessAccounts: Account[];
   employeeAccountIds: Set<string>;
   transactions: Transaction[];
-  addAccount: (account: Omit<Account, 'id'>) => Promise<Account>;
+  addAccount: (account: Omit<Account, 'id' | 'businessId'>) => Promise<Account>;
 
   // Role: business owner (full access) or an employee with an assigned account
   role: 'owner' | 'employee';
   currentEmployee: Employee | null;
   joinError: string | null;
 
+  // Negocios: the owner can create separate businesses (own accounts/employees)
+  // and switch between them without logging out. Never available to employees.
+  businesses: Business[];
+  activeBusinessId: string;
+  activeBusinessName: string;
+  switchBusiness: (businessId: string) => void;
+  createBusiness: (name: string) => Promise<Business>;
+
   // Payroll & Loans
   employees: Employee[];
   payrollHistory: PayrollPayment[];
-  addEmployee: (emp: Omit<Employee, 'id' | 'loans'>) => Promise<Employee>;
+  addEmployee: (emp: Omit<Employee, 'id' | 'loans' | 'businessId'>) => Promise<Employee>;
   updateEmployee: (employeeId: string, updates: Partial<Omit<Employee, 'id' | 'loans'>>) => void;
   deleteEmployee: (employeeId: string) => void;
   requestLoan: (employeeId: string, loanData: { type: 'advance' | 'loan'; description: string; totalAmount: number; deductionPerPayment: number; payFromAccountId?: string }) => void;
@@ -81,7 +95,7 @@ interface AppContextType {
   // Recurring Expenses / Budget
   recurringExpenses: RecurringExpense[];
   payRecurringExpense: (expenseId: string, accountId?: string) => void;
-  addRecurringExpense: (expense: Omit<RecurringExpense, 'id' | 'isPaid'>) => RecurringExpense;
+  addRecurringExpense: (expense: Omit<RecurringExpense, 'id' | 'isPaid' | 'businessId'>) => RecurringExpense;
 
   // Modals
   quickExpenseModalOpen: boolean;
@@ -99,9 +113,12 @@ interface AppContextType {
   setReceiptModalOpen: (open: boolean) => void;
 
   // Quick Actions
-  addTransaction: (tx: Omit<Transaction, 'id' | 'date' | 'createdAt' | 'groupDate' | 'reference' | 'status'>) => Transaction;
+  addTransaction: (tx: Omit<Transaction, 'id' | 'date' | 'createdAt' | 'groupDate' | 'reference' | 'status' | 'businessId'>) => Transaction;
   attachReceipt: (transactionId: string, file: File) => Promise<void>;
   getReceiptUrl: (path: string) => Promise<string | null>;
+  hasMoreTransactions: boolean;
+  loadingMoreTransactions: boolean;
+  loadMoreTransactions: () => Promise<void>;
   performExchange: (
     primaryAmount: number,
     secondaryAmount: number,
@@ -136,12 +153,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [dataLoading, setDataLoading] = useState<boolean>(true);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
+  // Whether the server might still have older transactions beyond the
+  // initial/loaded page — lets Movimientos offer "cargar más" only when
+  // there's actually more history to fetch.
+  const [hasMoreTransactions, setHasMoreTransactions] = useState<boolean>(true);
+  const [loadingMoreTransactions, setLoadingMoreTransactions] = useState<boolean>(false);
 
   // Role: is this session the business owner, or an employee with limited access?
   const [role, setRole] = useState<'owner' | 'employee'>('owner');
   const [ownerId, setOwnerId] = useState<string | null>(null);
   const [currentEmployee, setCurrentEmployee] = useState<Employee | null>(null);
   const [joinError, setJoinError] = useState<string | null>(null);
+
+  // Negocios: additional businesses the owner created, each with its own
+  // accounts/employees/etc. The "personal" business is implicit (id ===
+  // the owner's own auth uid) and never appears in this list.
+  const [businesses, setBusinesses] = useState<Business[]>([]);
+  const [activeBusinessId, setActiveBusinessId] = useState<string>('');
 
   // Payroll & Loans
   const [employees, setEmployees] = useState<Employee[]>([]);
@@ -244,20 +272,36 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         }
       }
 
-      const [accRes, txRes, empRes, loanRes, payRes, recRes, taskRes] = await Promise.all([
+      // Capped to the most recent rows, not the entire lifetime history — an
+      // ever-growing table would otherwise get slower to fetch/parse forever.
+      // Movimientos (the one screen that lists these in full) paginates its
+      // own render on top of this, and can load further pages straight from
+      // Supabase once the user actually asks to see older history.
+      const [accRes, txRes, empRes, loanRes, payRes, recRes, taskRes, bizRes] = await Promise.all([
         supabase.from('accounts').select('*').order('created_at', { ascending: true }),
-        supabase.from('transactions').select('*').order('created_at', { ascending: false }),
+        supabase.from('transactions').select('*').order('created_at', { ascending: false }).limit(TRANSACTIONS_INITIAL_LIMIT),
         supabase.from('employees').select('*').order('created_at', { ascending: true }),
         supabase.from('employee_loans').select('*'),
-        supabase.from('payroll_history').select('*').order('created_at', { ascending: false }),
+        supabase.from('payroll_history').select('*').order('created_at', { ascending: false }).limit(200),
         supabase.from('recurring_expenses').select('*').order('created_at', { ascending: true }),
-        supabase.from('tasks').select('*').order('created_at', { ascending: false })
+        supabase.from('tasks').select('*').order('created_at', { ascending: false }),
+        supabase.from('businesses').select('*').order('created_at', { ascending: true })
       ]);
 
       if (cancelled) return;
 
+      if (bizRes.data) setBusinesses(bizRes.data.map(businessFromDb));
+
+      // Remember which business was active for this user, across reloads —
+      // employees never switch, so this only really matters for the owner.
+      const savedBusinessId = localStorage.getItem(ACTIVE_BUSINESS_STORAGE_PREFIX + user.id);
+      setActiveBusinessId(savedBusinessId || user.id);
+
       if (accRes.data) setAccounts(accRes.data.map(accountFromDb));
-      if (txRes.data) setTransactions(txRes.data.map(transactionFromDb));
+      if (txRes.data) {
+        setTransactions(txRes.data.map(transactionFromDb));
+        setHasMoreTransactions(txRes.data.length >= TRANSACTIONS_INITIAL_LIMIT);
+      }
 
       if (empRes.data) {
         const loansByEmployee: Record<string, EmployeeLoan[]> = {};
@@ -333,20 +377,78 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
   }, []);
 
+  // Which business is "active" for insert-tagging purposes: the owner's
+  // explicit choice, or — for an employee — whichever business their own
+  // employee row belongs to (they never get a switcher; their own rows
+  // already come back correctly scoped by RLS regardless of business).
+  const effectiveBusinessId = role === 'owner' ? activeBusinessId : (currentEmployee?.businessId || activeBusinessId);
+
+  const activeBusinessName = useMemo(() => {
+    if (!activeBusinessId || activeBusinessId === user?.id) return 'Personal';
+    return businesses.find((b) => b.id === activeBusinessId)?.name || 'Personal';
+  }, [activeBusinessId, businesses, user?.id]);
+
+  // Every row carries a business_id, but only the owner ever has more than
+  // one business to pick from — scope what's shown to the active one.
+  const scopedAccounts = useMemo(
+    () => (role === 'owner' ? accounts.filter((a) => a.businessId === activeBusinessId) : accounts),
+    [accounts, role, activeBusinessId]
+  );
+  const scopedTransactions = useMemo(
+    () => (role === 'owner' ? transactions.filter((t) => t.businessId === activeBusinessId) : transactions),
+    [transactions, role, activeBusinessId]
+  );
+  const scopedEmployees = useMemo(
+    () => (role === 'owner' ? employees.filter((e) => e.businessId === activeBusinessId) : employees),
+    [employees, role, activeBusinessId]
+  );
+  const scopedPayrollHistory = useMemo(
+    () => (role === 'owner' ? payrollHistory.filter((p) => p.businessId === activeBusinessId) : payrollHistory),
+    [payrollHistory, role, activeBusinessId]
+  );
+  const scopedRecurringExpenses = useMemo(
+    () => (role === 'owner' ? recurringExpenses.filter((r) => r.businessId === activeBusinessId) : recurringExpenses),
+    [recurringExpenses, role, activeBusinessId]
+  );
+  const scopedTasks = useMemo(
+    () => (role === 'owner' ? tasks.filter((t) => t.businessId === activeBusinessId) : tasks),
+    [tasks, role, activeBusinessId]
+  );
+
+  const switchBusiness = (businessId: string) => {
+    if (role !== 'owner') return;
+    setActiveBusinessId(businessId);
+    if (user) localStorage.setItem(ACTIVE_BUSINESS_STORAGE_PREFIX + user.id, businessId);
+  };
+
+  const createBusiness = async (name: string): Promise<Business> => {
+    const newBusiness: Business = { id: genId('biz'), name, createdAt: new Date().toISOString() };
+    setBusinesses((prev) => [...prev, newBusiness]);
+
+    if (user) {
+      const { error } = await supabase.from('businesses').insert(businessToDb(newBusiness, user.id));
+      if (error) syncError('negocio nuevo');
+    }
+
+    switchBusiness(newBusiness.id);
+    showToast(`Negocio "${newBusiness.name}" creado`);
+    return newBusiness;
+  };
+
   // Cuentas propias de empleados (Asignaciones) — separadas del panorama
   // global del negocio (Cuentas, Inicio, Gráficos).
   const employeeAccountIds = useMemo(() => {
     const ids = new Set<string>();
-    employees.forEach((e) => {
+    scopedEmployees.forEach((e) => {
       if (e.assignedAccountId) ids.add(e.assignedAccountId);
       if (e.exchangeCounterpartAccountId) ids.add(e.exchangeCounterpartAccountId);
     });
     return ids;
-  }, [employees]);
+  }, [scopedEmployees]);
 
   const businessAccounts = useMemo(
-    () => accounts.filter((a) => !employeeAccountIds.has(a.id)),
-    [accounts, employeeAccountIds]
+    () => scopedAccounts.filter((a) => !employeeAccountIds.has(a.id)),
+    [scopedAccounts, employeeAccountIds]
   );
 
   // Calculations
@@ -383,10 +485,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // (e.g. provisionEmployeeAccounts) can be sure the row exists in the cloud
   // first — otherwise that follow-up update can fail on the foreign key, or
   // silently outrun this insert.
-  const addAccount = async (accountData: Omit<Account, 'id'>): Promise<Account> => {
+  const addAccount = async (accountData: Omit<Account, 'id' | 'businessId'>): Promise<Account> => {
     const newAccount: Account = {
       ...accountData,
-      id: genId('acc')
+      id: genId('acc'),
+      businessId: effectiveBusinessId
     };
     setAccounts((prev) => [...prev, newAccount]);
 
@@ -399,11 +502,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return newAccount;
   };
 
-  const addTransaction = (newTxData: Omit<Transaction, 'id' | 'date' | 'createdAt' | 'groupDate' | 'reference' | 'status'>) => {
+  const addTransaction = (newTxData: Omit<Transaction, 'id' | 'date' | 'createdAt' | 'groupDate' | 'reference' | 'status' | 'businessId'>) => {
     const randomNum = Math.floor(1000000 + Math.random() * 9000000);
     const newTx: Transaction = {
       ...newTxData,
       id: genId('tx'),
+      businessId: effectiveBusinessId,
       date: 'Hoy, ' + new Date().toLocaleTimeString('es-VE', { hour: '2-digit', minute: '2-digit', hour12: true }),
       createdAt: new Date().toISOString(),
       groupDate: 'HOY',
@@ -481,15 +585,45 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return data.signedUrl;
   };
 
+  // Fetches the next page of older transactions straight from Supabase —
+  // only called when Movimientos actually runs out of what's already
+  // loaded, so history beyond the initial page is never pulled unless it's
+  // genuinely about to be shown. Scoped to the active business at the query
+  // level (not just filtered after the fact) to avoid pulling rows that
+  // wouldn't even be displayed.
+  const loadMoreTransactions = async () => {
+    if (!user || loadingMoreTransactions || !hasMoreTransactions) return;
+    setLoadingMoreTransactions(true);
+
+    const oldest = transactions.length > 0 ? transactions[transactions.length - 1].createdAt : null;
+    let query = supabase
+      .from('transactions')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(TRANSACTIONS_PAGE_SIZE);
+    if (role === 'owner') query = query.eq('business_id', activeBusinessId);
+    if (oldest) query = query.lt('created_at', oldest);
+
+    const { data, error } = await query;
+    setLoadingMoreTransactions(false);
+    if (error || !data) return;
+
+    setHasMoreTransactions(data.length >= TRANSACTIONS_PAGE_SIZE);
+    if (data.length > 0) {
+      setTransactions((prev) => [...prev, ...data.map(transactionFromDb)]);
+    }
+  };
+
   // Employee & Loan Actions
   // Async and awaited on purpose: provisionEmployeeAccounts (called right after
   // this, when "needs account" is checked) links accounts by updating this same
   // row — if that update ran before the insert below actually landed, it would
   // silently match zero rows and the links would be lost on the next reload.
-  const addEmployee = async (empData: Omit<Employee, 'id' | 'loans'>): Promise<Employee> => {
+  const addEmployee = async (empData: Omit<Employee, 'id' | 'loans' | 'businessId'>): Promise<Employee> => {
     const newEmp: Employee = {
       ...empData,
       id: genId('emp'),
+      businessId: effectiveBusinessId,
       loans: []
     };
     setEmployees((prev) => [...prev, newEmp]);
@@ -726,6 +860,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const loanId = genId('loan');
     const newLoan: EmployeeLoan = {
       id: loanId,
+      businessId: effectiveBusinessId,
       employeeId,
       type: loanData.type,
       description: loanData.description,
@@ -923,6 +1058,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     const paymentRecord: PayrollPayment = {
       id: genId('pay'),
+      businessId: effectiveBusinessId,
       employeeId: emp.id,
       employeeName: emp.name,
       period,
@@ -1055,10 +1191,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     showToast(`Gasto "${expense.name}" pagado con éxito`);
   };
 
-  const addRecurringExpense = (newExpenseData: Omit<RecurringExpense, 'id' | 'isPaid'>): RecurringExpense => {
+  const addRecurringExpense = (newExpenseData: Omit<RecurringExpense, 'id' | 'isPaid' | 'businessId'>): RecurringExpense => {
     const newExp: RecurringExpense = {
       ...newExpenseData,
       id: genId('rec'),
+      businessId: effectiveBusinessId,
       isPaid: false
     };
     setRecurringExpenses((prev) => [...prev, newExp]);
@@ -1077,6 +1214,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const addTask = (taskData: { title: string; description?: string; priority: TaskPriority; assignedEmployeeId?: string; dueDate?: string }) => {
     const newTask: Task = {
       id: genId('task'),
+      businessId: effectiveBusinessId,
       title: taskData.title,
       description: taskData.description,
       priority: taskData.priority,
@@ -1122,6 +1260,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     const exchangeTx: Transaction = {
       id: genId('swap'),
+      businessId: effectiveBusinessId,
       title: isVesToUsd ? 'Cambio VES ➔ USD' : 'Cambio USD ➔ VES',
       category: 'Cambio',
       categoryEmoji: '🔄',
@@ -1199,16 +1338,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setHideBalances,
         toggleHideBalances,
         dataLoading,
-        accounts,
+        accounts: scopedAccounts,
         businessAccounts,
         employeeAccountIds,
-        transactions,
+        transactions: scopedTransactions,
         addAccount,
         role,
         currentEmployee,
         joinError,
-        employees,
-        payrollHistory,
+        businesses,
+        activeBusinessId,
+        activeBusinessName,
+        switchBusiness,
+        createBusiness,
+        employees: scopedEmployees,
+        payrollHistory: scopedPayrollHistory,
         addEmployee,
         updateEmployee,
         deleteEmployee,
@@ -1218,10 +1362,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         grantEmployeeAccess,
         provisionEmployeeAccounts,
         assignFundsToEmployee,
-        tasks,
+        tasks: scopedTasks,
         addTask,
         updateTaskStatus,
-        recurringExpenses,
+        recurringExpenses: scopedRecurringExpenses,
         payRecurringExpense,
         addRecurringExpense,
         quickExpenseModalOpen,
@@ -1240,6 +1384,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         addTransaction,
         attachReceipt,
         getReceiptUrl,
+        hasMoreTransactions,
+        loadingMoreTransactions,
+        loadMoreTransactions,
         performExchange,
         toastMessage,
         showToast,

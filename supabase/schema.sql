@@ -424,3 +424,72 @@ create policy "employee inserts own account transactions" on public.transactions
 -- pero que igual pueden tener cuentas propias y recibir asignaciones.
 -- ============================================================================
 alter table public.employees add column if not exists receives_payroll boolean not null default true;
+
+-- ============================================================================
+-- Negocios: el dueño puede crear "negocios" adicionales con sus propias
+-- cuentas y empleados, totalmente separados entre sí, y cambiar entre ellos
+-- sin cerrar sesión. Un empleado nunca puede crear ni cambiar de negocio —
+-- esto es exclusivo del dueño (lo impone la UI, no hace falta en RLS: la
+-- separación entre negocios es organizativa para el mismo dueño, no un
+-- límite de seguridad entre personas distintas).
+--
+-- El negocio "personal" (el original, de toda la vida) es implícito: su
+-- business_id es el propio auth.uid() del dueño, y nunca aparece como fila
+-- en esta tabla — solo los negocios adicionales que cree se registran aquí.
+-- ============================================================================
+create table if not exists public.businesses (
+  id text primary key,
+  user_id uuid not null default auth.uid() references auth.users(id) on delete cascade,
+  name text not null,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists businesses_user_id_idx on public.businesses(user_id);
+
+alter table public.businesses enable row level security;
+
+drop policy if exists "own businesses" on public.businesses;
+create policy "own businesses" on public.businesses
+  for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
+-- business_id en cada tabla de datos, con back-fill al negocio "personal"
+-- (business_id = user_id) para todo lo que ya existía antes de este cambio.
+alter table public.accounts add column if not exists business_id text;
+update public.accounts set business_id = user_id::text where business_id is null;
+alter table public.accounts alter column business_id set not null;
+
+alter table public.transactions add column if not exists business_id text;
+update public.transactions set business_id = user_id::text where business_id is null;
+alter table public.transactions alter column business_id set not null;
+
+alter table public.employees add column if not exists business_id text;
+update public.employees set business_id = user_id::text where business_id is null;
+alter table public.employees alter column business_id set not null;
+
+alter table public.employee_loans add column if not exists business_id text;
+update public.employee_loans set business_id = user_id::text where business_id is null;
+alter table public.employee_loans alter column business_id set not null;
+
+alter table public.payroll_history add column if not exists business_id text;
+update public.payroll_history set business_id = user_id::text where business_id is null;
+alter table public.payroll_history alter column business_id set not null;
+
+alter table public.recurring_expenses add column if not exists business_id text;
+update public.recurring_expenses set business_id = user_id::text where business_id is null;
+alter table public.recurring_expenses alter column business_id set not null;
+
+alter table public.tasks add column if not exists business_id text;
+update public.tasks set business_id = user_id::text where business_id is null;
+alter table public.tasks alter column business_id set not null;
+
+create index if not exists accounts_business_id_idx on public.accounts(business_id);
+create index if not exists transactions_business_id_idx on public.transactions(business_id);
+create index if not exists employees_business_id_idx on public.employees(business_id);
+
+-- ============================================================================
+-- Rendimiento: índices compuestos para las consultas paginadas por negocio
+-- ordenadas por fecha (las que hace el cliente al pedir "más historial") —
+-- sin esto, cada página se buscaría con un escaneo completo de la tabla.
+-- ============================================================================
+create index if not exists transactions_business_created_idx on public.transactions(business_id, created_at desc);
+create index if not exists payroll_history_business_created_idx on public.payroll_history(business_id, created_at desc);
