@@ -493,3 +493,108 @@ create index if not exists employees_business_id_idx on public.employees(busines
 -- ============================================================================
 create index if not exists transactions_business_created_idx on public.transactions(business_id, created_at desc);
 create index if not exists payroll_history_business_created_idx on public.payroll_history(business_id, created_at desc);
+
+-- ============================================================================
+-- Fix: a un empleado nunca se le había dado permiso para actualizar el saldo
+-- de su propia cuenta (solo podía leerla) — cada gasto/ingreso/cambio que
+-- registraba insertaba el movimiento pero el saldo se quedaba desactualizado
+-- en silencio, porque RLS bloqueaba el update sin devolver un error visible.
+-- Lo arreglamos dándole permiso de update, pero solo puede tocar el saldo —
+-- el resto de columnas quedan protegidas por el trigger de abajo.
+-- ============================================================================
+drop policy if exists "employee updates assigned account balance" on public.accounts;
+create policy "employee updates assigned account balance" on public.accounts
+  for update
+  using (
+    id = (select assigned_account_id from public.current_employee())
+    or id = (select exchange_counterpart_account_id from public.current_employee())
+  )
+  with check (
+    id = (select assigned_account_id from public.current_employee())
+    or id = (select exchange_counterpart_account_id from public.current_employee())
+  );
+
+create or replace function public.enforce_employee_balance_only()
+returns trigger
+language plpgsql
+as $$
+begin
+  if auth.uid() <> old.user_id then
+    if new.name is distinct from old.name
+       or new.type is distinct from old.type
+       or new.currency is distinct from old.currency
+       or new.user_id is distinct from old.user_id
+       or new.business_id is distinct from old.business_id
+       or new.account_number is distinct from old.account_number
+       or new.holder is distinct from old.holder
+       or new.phone is distinct from old.phone
+       or new.ci is distinct from old.ci
+       or new.bank_code is distinct from old.bank_code
+       or new.is_default is distinct from old.is_default
+       or new.status_text is distinct from old.status_text
+       or new.icon is distinct from old.icon
+       or new.color is distinct from old.color then
+      raise exception 'employees can only update their account balance';
+    end if;
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_enforce_employee_balance_only on public.accounts;
+create trigger trg_enforce_employee_balance_only
+  before update on public.accounts
+  for each row execute function public.enforce_employee_balance_only();
+
+-- ============================================================================
+-- Red de seguridad: si por cualquier bug del cliente un insert llega sin
+-- business_id, que NUNCA se pierda el registro por violar el not null —
+-- que caiga automáticamente al negocio "personal" del dueño (user_id) en
+-- vez de que la fila entera falle en silencio.
+-- ============================================================================
+create or replace function public.default_business_id()
+returns trigger
+language plpgsql
+as $$
+begin
+  if new.business_id is null then
+    new.business_id := new.user_id::text;
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_default_business_id_accounts on public.accounts;
+create trigger trg_default_business_id_accounts
+  before insert on public.accounts
+  for each row execute function public.default_business_id();
+
+drop trigger if exists trg_default_business_id_transactions on public.transactions;
+create trigger trg_default_business_id_transactions
+  before insert on public.transactions
+  for each row execute function public.default_business_id();
+
+drop trigger if exists trg_default_business_id_employees on public.employees;
+create trigger trg_default_business_id_employees
+  before insert on public.employees
+  for each row execute function public.default_business_id();
+
+drop trigger if exists trg_default_business_id_employee_loans on public.employee_loans;
+create trigger trg_default_business_id_employee_loans
+  before insert on public.employee_loans
+  for each row execute function public.default_business_id();
+
+drop trigger if exists trg_default_business_id_payroll_history on public.payroll_history;
+create trigger trg_default_business_id_payroll_history
+  before insert on public.payroll_history
+  for each row execute function public.default_business_id();
+
+drop trigger if exists trg_default_business_id_recurring_expenses on public.recurring_expenses;
+create trigger trg_default_business_id_recurring_expenses
+  before insert on public.recurring_expenses
+  for each row execute function public.default_business_id();
+
+drop trigger if exists trg_default_business_id_tasks on public.tasks;
+create trigger trg_default_business_id_tasks
+  before insert on public.tasks
+  for each row execute function public.default_business_id();

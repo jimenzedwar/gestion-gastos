@@ -381,7 +381,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // explicit choice, or — for an employee — whichever business their own
   // employee row belongs to (they never get a switcher; their own rows
   // already come back correctly scoped by RLS regardless of business).
-  const effectiveBusinessId = role === 'owner' ? activeBusinessId : (currentEmployee?.businessId || activeBusinessId);
+  // Several fallbacks deep on purpose: this must never end up empty/undefined
+  // — an insert sent without it would violate the not-null constraint and the
+  // whole row would be lost rather than just mis-filed under the wrong business.
+  const effectiveBusinessId =
+    (role === 'owner' ? activeBusinessId : currentEmployee?.businessId) || activeBusinessId || ownerId || user?.id || '';
 
   const activeBusinessName = useMemo(() => {
     if (!activeBusinessId || activeBusinessId === user?.id) return 'Personal';
@@ -446,9 +450,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return ids;
   }, [scopedEmployees]);
 
+  // This exclusion only makes sense from the OWNER's point of view (hiding
+  // employee-owned accounts from the business-wide totals/pickers). For an
+  // employee session, scopedAccounts is already exactly their own 1-2
+  // accounts via RLS — filtering those out here would leave them with
+  // nothing to pick from in their own "Anotar Gasto/Ingreso" and "Cambiar
+  // Divisas" modals, which is exactly the bug that made those unusable.
   const businessAccounts = useMemo(
-    () => scopedAccounts.filter((a) => !employeeAccountIds.has(a.id)),
-    [scopedAccounts, employeeAccountIds]
+    () => (role === 'owner' ? scopedAccounts.filter((a) => !employeeAccountIds.has(a.id)) : scopedAccounts),
+    [scopedAccounts, employeeAccountIds, role]
   );
 
   // Calculations
