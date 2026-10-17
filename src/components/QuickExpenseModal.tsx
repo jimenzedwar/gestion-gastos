@@ -27,6 +27,7 @@ export const QuickExpenseModal: React.FC = () => {
 
   const [currency, setCurrency] = useState<Currency>('USD');
   const [amountStr, setAmountStr] = useState<string>('0');
+  const [commissionStr, setCommissionStr] = useState<string>('');
   const [concept, setConcept] = useState<string>('');
   const [selectedCategory, setSelectedCategory] = useState<string>(categories[0].label);
   const [selectedAccountId, setSelectedAccountId] = useState<string>(availableAccounts[0]?.id || '');
@@ -38,6 +39,7 @@ export const QuickExpenseModal: React.FC = () => {
     if (quickExpenseModalOpen) {
       setSelectedCategory((isIncome ? INCOME_CATEGORIES : QUICK_CATEGORIES)[0].label);
       setSelectedAccountId(availableAccounts[0]?.id || '');
+      setCommissionStr('');
     }
     // Reset category & default account whenever the modal opens or its scope changes
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -49,8 +51,9 @@ export const QuickExpenseModal: React.FC = () => {
   const receiptMissing = !isIncome && isEmployeeAccount && !receiptFile;
   const selectedAccount = availableAccounts.find((a) => a.id === selectedAccountId);
   const currentAmountForBalanceCheck = parseFloat(amountStr) || 0;
+  const commissionAmount = isIncome ? 0 : parseFloat(commissionStr) || 0;
   const insufficientBalance =
-    !isIncome && !!selectedAccount && currentAmountForBalanceCheck > selectedAccount.balance;
+    !isIncome && !!selectedAccount && currentAmountForBalanceCheck + commissionAmount > selectedAccount.balance;
 
   if (availableAccounts.length === 0) {
     return (
@@ -142,9 +145,15 @@ export const QuickExpenseModal: React.FC = () => {
     const account = accounts.find((a) => a.id === selectedAccountId) || accounts[0];
     const catObj = categories.find((c) => c.label === selectedCategory) || categories[0];
 
-    const usdVal = currency === 'USD' ? currentAmount : currentAmount / bcvRate;
-    const vesVal = currency === 'VES' ? currentAmount : currentAmount * bcvRate;
+    const totalAmount = currentAmount + commissionAmount;
+    const usdVal = currency === 'USD' ? totalAmount : totalAmount / bcvRate;
+    const vesVal = currency === 'VES' ? totalAmount : totalAmount * bcvRate;
     const sign = isIncome ? 1 : -1;
+
+    const commissionNote =
+      commissionAmount > 0
+        ? ` + comisión bancaria de ${currency === 'USD' ? '$' : 'Bs. '}${commissionAmount.toLocaleString('es-VE', { minimumFractionDigits: 2 })}`
+        : '';
 
     setSaving(true);
     const newTx = addTransaction({
@@ -159,7 +168,7 @@ export const QuickExpenseModal: React.FC = () => {
       secondaryAmount: sign * (currency === 'USD' ? vesVal : usdVal),
       rate: bcvRate,
       icon: 'receipt',
-      note: isIncome ? `Ingreso rápido registrado en ${account.name}` : `Gasto rápido registrado con ${account.name}`,
+      note: (isIncome ? `Ingreso rápido registrado en ${account.name}` : `Gasto rápido registrado con ${account.name}`) + commissionNote,
       beneficiary: {
         name: concept || (isIncome ? 'Fuente de ingreso' : 'Comercio Local'),
         branch: 'Caracas, VE',
@@ -179,7 +188,7 @@ export const QuickExpenseModal: React.FC = () => {
     setSaving(false);
     setQuickExpenseModalOpen(false);
     handleRemoveReceipt();
-    showToast(`${isIncome ? 'Ingreso registrado' : 'Gasto registrado'}: ${currency === 'USD' ? '$' : 'Bs. '} ${currentAmount.toLocaleString('es-VE')}`);
+    showToast(`${isIncome ? 'Ingreso registrado' : 'Gasto registrado'}: ${currency === 'USD' ? '$' : 'Bs. '} ${totalAmount.toLocaleString('es-VE')}`);
   };
 
   return (
@@ -281,6 +290,35 @@ export const QuickExpenseModal: React.FC = () => {
               className="w-full bg-white px-3.5 py-2.5 rounded-xl border border-[#eaedff] focus:border-[#0055ff] focus:ring-2 focus:ring-[#0055ff]/15 outline-none text-sm font-medium text-[#131b2e]"
             />
           </div>
+
+          {/* Bank commission (optional, expenses only) */}
+          {!isIncome && (
+            <div>
+              <label className="block text-xs font-bold text-[#434656] mb-1.5">
+                Comisión bancaria (opcional)
+              </label>
+              <div className="flex items-center gap-2 bg-white px-3.5 py-2.5 rounded-xl border border-[#eaedff] focus-within:border-[#0055ff] focus-within:ring-2 focus-within:ring-[#0055ff]/15">
+                <span className="text-sm font-bold text-[#737688]">{currency === 'USD' ? '$' : 'Bs.'}</span>
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  value={commissionStr}
+                  onChange={(e) => {
+                    const raw = e.target.value.replace(',', '.');
+                    if (raw === '' || /^\d*\.?\d{0,2}$/.test(raw)) setCommissionStr(raw);
+                  }}
+                  placeholder="0.00"
+                  className="w-full bg-transparent outline-none text-sm font-medium text-[#131b2e]"
+                />
+              </div>
+              {commissionAmount > 0 && (
+                <p className="mt-1 text-[11px] text-[#737688]">
+                  Se descontará junto al gasto: total {currency === 'USD' ? '$' : 'Bs. '}
+                  {(currentAmount + commissionAmount).toLocaleString('es-VE', { minimumFractionDigits: 2 })}
+                </p>
+              )}
+            </div>
+          )}
 
           {/* Quick Categories */}
           <div>
@@ -407,7 +445,7 @@ export const QuickExpenseModal: React.FC = () => {
                 ? 'Saldo insuficiente'
                 : receiptMissing
                 ? 'Adjunta un comprobante'
-                : `${isIncome ? 'Guardar Ingreso' : 'Guardar Gasto'} (${currency === 'USD' ? '$' : 'Bs.'} ${currentAmount.toLocaleString('es-VE', { minimumFractionDigits: 2 })})`}
+                : `${isIncome ? 'Guardar Ingreso' : 'Guardar Gasto'} (${currency === 'USD' ? '$' : 'Bs.'} ${(currentAmount + commissionAmount).toLocaleString('es-VE', { minimumFractionDigits: 2 })})`}
             </span>
             {!saving && <ArrowRight className="w-4 h-4" />}
           </button>

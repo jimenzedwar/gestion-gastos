@@ -31,6 +31,8 @@ export const ExchangeScreen: React.FC = () => {
 
   const [fromAccountId, setFromAccountId] = useState<string>('zinli-1');
   const [toAccountId, setToAccountId] = useState<string>('banesco-pm');
+  const [useManualOutput, setUseManualOutput] = useState(false);
+  const [manualOutputStr, setManualOutputStr] = useState('');
 
   // Update default accounts when direction toggles
   useEffect(() => {
@@ -47,6 +49,8 @@ export const ExchangeScreen: React.FC = () => {
       if (usdAcc) setToAccountId(usdAcc.id);
       setInputAmount(7500);
     }
+    setUseManualOutput(false);
+    setManualOutputStr('');
   }, [direction, accounts]);
 
   const hasUsdAccount = accounts.some((a) => a.currency === 'USD');
@@ -81,9 +85,22 @@ export const ExchangeScreen: React.FC = () => {
 
   // Calculations
   const isVesToUsd = direction === 'ves_to_usd';
-  const calculatedOutput = isVesToUsd
+  const autoCalculatedOutput = isVesToUsd
     ? (inputAmount > 0 && effectiveRate > 0 ? inputAmount / effectiveRate : 0)
     : inputAmount * effectiveRate;
+
+  const manualOutputAmount = parseFloat(manualOutputStr) || 0;
+  const calculatedOutput = useManualOutput ? manualOutputAmount : autoCalculatedOutput;
+
+  // When the exact received amount is entered by hand (e.g. the exchange
+  // house/Binance took a commission), derive the real rate from it instead
+  // of using the configured BCV/custom rate — that's what actually happened.
+  const impliedRate =
+    useManualOutput && inputAmount > 0 && manualOutputAmount > 0
+      ? isVesToUsd
+        ? inputAmount / manualOutputAmount
+        : manualOutputAmount / inputAmount
+      : effectiveRate;
 
   const insufficientBalance = inputAmount > fromAccount.balance;
 
@@ -108,7 +125,11 @@ export const ExchangeScreen: React.FC = () => {
       showToast('Saldo insuficiente en la cuenta de origen');
       return;
     }
-    if (effectiveRate <= 0) {
+    if (useManualOutput && manualOutputAmount <= 0) {
+      showToast('Ingresa el monto exacto que llegó a la cuenta');
+      return;
+    }
+    if (!useManualOutput && effectiveRate <= 0) {
       showToast('Ingresa una tasa de cambio válida mayor a 0');
       return;
     }
@@ -118,7 +139,7 @@ export const ExchangeScreen: React.FC = () => {
       calculatedOutput,
       fromAccount.id,
       toAccount.id,
-      effectiveRate,
+      impliedRate,
       isVesToUsd
     );
     if (!tx) return;
@@ -334,24 +355,58 @@ export const ExchangeScreen: React.FC = () => {
         <div className="p-4 sm:p-5 bg-[#f2f3ff] rounded-2xl border border-[#eaedff] space-y-3">
           <div className="flex items-center justify-between text-xs text-[#434656] font-semibold">
             <span>Tú recibes (Inmediato)</span>
-            <span className="text-[11px] px-2.5 py-0.5 rounded-full bg-[#6cf8bb] text-[#00714d] font-bold">
-              Acreditación Inmediata
-            </span>
+            <button
+              type="button"
+              onClick={() => {
+                if (useManualOutput) {
+                  setUseManualOutput(false);
+                  setManualOutputStr('');
+                } else {
+                  setManualOutputStr(autoCalculatedOutput ? autoCalculatedOutput.toFixed(2) : '');
+                  setUseManualOutput(true);
+                }
+              }}
+              className={`text-[11px] px-2.5 py-0.5 rounded-full font-bold transition-colors ${
+                useManualOutput
+                  ? 'bg-[#fef3c7] text-[#92400e] hover:bg-[#fde68a]'
+                  : 'bg-[#6cf8bb] text-[#00714d] hover:bg-[#53e8a5]'
+              }`}
+            >
+              {useManualOutput ? 'Usar cálculo automático' : 'Ingresar monto exacto'}
+            </button>
           </div>
 
           <div className="flex items-center justify-between gap-3">
             <div className="flex items-baseline gap-1.5 font-display text-2xl sm:text-3xl md:text-4xl font-extrabold text-[#006c49] min-w-0 flex-1">
               <span className="text-xl font-bold">{isVesToUsd ? '$' : 'Bs.'}</span>
-              <span className="truncate">
-                {isVesToUsd
-                  ? calculatedOutput.toFixed(2)
-                  : calculatedOutput.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-              </span>
+              {useManualOutput ? (
+                <input
+                  type="number"
+                  min="0"
+                  step="any"
+                  value={manualOutputStr}
+                  onChange={(e) => setManualOutputStr(e.target.value)}
+                  placeholder="0.00"
+                  autoFocus
+                  className="w-full bg-transparent outline-none font-bold min-w-0 text-[#006c49]"
+                />
+              ) : (
+                <span className="truncate">
+                  {isVesToUsd
+                    ? calculatedOutput.toFixed(2)
+                    : calculatedOutput.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </span>
+              )}
             </div>
             <div className="px-3 py-1.5 bg-[#6cf8bb]/50 rounded-full text-xs font-bold text-[#00714d] shrink-0">
               {isVesToUsd ? 'USD ($)' : 'VES (Bs.)'}
             </div>
           </div>
+          {useManualOutput && inputAmount > 0 && manualOutputAmount > 0 && (
+            <div className="text-[11px] text-[#434656]">
+              Tasa real aplicada: 1 USD = Bs. {impliedRate.toFixed(2)}
+            </div>
+          )}
 
           <div className="pt-3 border-t border-[#eaedff] flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
             <span className="text-[#737688]">Cuenta acreditada:</span>
@@ -376,13 +431,19 @@ export const ExchangeScreen: React.FC = () => {
           <div className="flex justify-between text-[#434656]">
             <span>Tasa de cambio aplicada:</span>
             <strong className="text-[#131b2e]">
-              1 USD = Bs. {effectiveRate.toFixed(2)}{' '}
-              {isCustomRateActive ? '(Tasa Libre)' : '(Oficial BCV)'}
+              1 USD = Bs. {impliedRate.toFixed(2)}{' '}
+              {useManualOutput ? '(Real, con comisión)' : isCustomRateActive ? '(Tasa Libre)' : '(Oficial BCV)'}
             </strong>
           </div>
           <div className="flex justify-between text-[#434656]">
             <span>Comisión de servicio:</span>
-            <strong className="text-[#006c49]">Bs. 0,00 (Sin comisiones)</strong>
+            <strong className={useManualOutput && manualOutputAmount < autoCalculatedOutput ? 'text-[#a20030]' : 'text-[#006c49]'}>
+              {useManualOutput
+                ? isVesToUsd
+                  ? `$${Math.abs(autoCalculatedOutput - manualOutputAmount).toFixed(2)}`
+                  : `Bs. ${Math.abs(autoCalculatedOutput - manualOutputAmount).toLocaleString('es-VE', { maximumFractionDigits: 2 })}`
+                : 'Bs. 0,00 (Sin comisiones)'}
+            </strong>
           </div>
           <div className="flex justify-between text-[#434656]">
             <span>Canal de liquidación:</span>
@@ -396,12 +457,14 @@ export const ExchangeScreen: React.FC = () => {
         <button
           type="button"
           onClick={handleConfirm}
-          disabled={insufficientBalance || inputAmount <= 0}
+          disabled={insufficientBalance || inputAmount <= 0 || (useManualOutput && manualOutputAmount <= 0)}
           className="w-full py-4 px-6 bg-[#0041c8] hover:bg-[#0036a8] disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-2xl font-display font-bold text-sm sm:text-base shadow-[0_8px_24px_rgba(0,65,200,0.28)] flex items-center justify-center gap-2 transition-all active:scale-[0.99]"
         >
           <span>
             {insufficientBalance
               ? 'Saldo insuficiente'
+              : useManualOutput && manualOutputAmount <= 0
+              ? 'Ingresa el monto recibido'
               : isVesToUsd
               ? `Confirmar Cambio (Bs. ${inputAmount.toLocaleString('es-VE')} ➔ $${calculatedOutput.toFixed(2)} USD)`
               : `Confirmar Cambio ($${inputAmount.toFixed(2)} ➔ Bs. ${calculatedOutput.toLocaleString('es-VE', { maximumFractionDigits: 0 })})`}

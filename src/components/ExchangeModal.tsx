@@ -44,6 +44,8 @@ export const ExchangeModal: React.FC = () => {
   const [receiptFile, setReceiptFile] = useState<File | null>(null);
   const [receiptPreview, setReceiptPreview] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [useManualOutput, setUseManualOutput] = useState(false);
+  const [manualOutputStr, setManualOutputStr] = useState('');
 
   useEffect(() => {
     if (direction === 'usd_to_ves') {
@@ -59,6 +61,8 @@ export const ExchangeModal: React.FC = () => {
       if (usdAcc) setToAccountId(usdAcc.id);
       setInputAmount(7500);
     }
+    setUseManualOutput(false);
+    setManualOutputStr('');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [direction, accountScope, exchangeModalOpen]);
 
@@ -96,9 +100,22 @@ export const ExchangeModal: React.FC = () => {
   const fromAccount = availableAccounts.find((a) => a.id === fromAccountId) || availableAccounts[0];
   const toAccount = availableAccounts.find((a) => a.id === toAccountId) || availableAccounts[1];
 
-  const calculatedOutput = isVesToUsd
+  const autoCalculatedOutput = isVesToUsd
     ? (inputAmount > 0 && effectiveRate > 0 ? inputAmount / effectiveRate : 0)
     : inputAmount * effectiveRate;
+
+  const manualOutputAmount = parseFloat(manualOutputStr) || 0;
+  const calculatedOutput = useManualOutput ? manualOutputAmount : autoCalculatedOutput;
+
+  // When the exact received amount is entered by hand (e.g. the exchange
+  // house/Binance took a commission), derive the real rate from it instead
+  // of using the configured BCV/custom rate — that's what actually happened.
+  const impliedRate =
+    useManualOutput && inputAmount > 0 && manualOutputAmount > 0
+      ? isVesToUsd
+        ? inputAmount / manualOutputAmount
+        : manualOutputAmount / inputAmount
+      : effectiveRate;
 
   const insufficientBalance = inputAmount > fromAccount.balance;
   const isEmployeeExchange = employeeAccountIds.has(fromAccount.id) || employeeAccountIds.has(toAccount.id);
@@ -140,7 +157,12 @@ export const ExchangeModal: React.FC = () => {
       return;
     }
 
-    if (effectiveRate <= 0) {
+    if (useManualOutput && manualOutputAmount <= 0) {
+      showToast('Ingresa el monto exacto que llegó a la cuenta');
+      return;
+    }
+
+    if (!useManualOutput && effectiveRate <= 0) {
       showToast('La tasa debe ser mayor a 0');
       return;
     }
@@ -156,7 +178,7 @@ export const ExchangeModal: React.FC = () => {
       calculatedOutput,
       fromAccount.id,
       toAccount.id,
-      effectiveRate,
+      impliedRate,
       isVesToUsd
     );
     if (!tx) {
@@ -267,7 +289,8 @@ export const ExchangeModal: React.FC = () => {
             <div className="text-right sm:text-left">
               <span className="text-[#737688] font-semibold block">Tasa aplicada:</span>
               <strong className="text-[#0041c8] font-bold">
-                1 USD = Bs. {effectiveRate.toFixed(2)} {isCustomRateActive ? '(Personalizada)' : '(BCV)'}
+                1 USD = Bs. {impliedRate.toFixed(2)}{' '}
+                {useManualOutput ? '(Real, con comisión)' : isCustomRateActive ? '(Personalizada)' : '(BCV)'}
               </strong>
             </div>
           </div>
@@ -359,23 +382,57 @@ export const ExchangeModal: React.FC = () => {
           <div className="bg-[#f2f3ff] p-4 rounded-2xl border border-[#eaedff] shadow-xs">
             <div className="flex items-center justify-between text-xs text-[#434656] font-semibold mb-2">
               <span>Tú recibes (Inmediato)</span>
-              <span className="text-[10px] px-2 py-0.5 rounded-full bg-[#6cf8bb] text-[#00714d] font-bold">
-                Acreditación Inmediata
-              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  if (useManualOutput) {
+                    setUseManualOutput(false);
+                    setManualOutputStr('');
+                  } else {
+                    setManualOutputStr(autoCalculatedOutput ? autoCalculatedOutput.toFixed(2) : '');
+                    setUseManualOutput(true);
+                  }
+                }}
+                className={`text-[10px] px-2 py-0.5 rounded-full font-bold transition-colors ${
+                  useManualOutput
+                    ? 'bg-[#fef3c7] text-[#92400e] hover:bg-[#fde68a]'
+                    : 'bg-[#6cf8bb] text-[#00714d] hover:bg-[#53e8a5]'
+                }`}
+              >
+                {useManualOutput ? 'Usar cálculo automático' : 'Ingresar monto exacto'}
+              </button>
             </div>
             <div className="flex items-center justify-between gap-3">
               <div className="flex items-center gap-1.5 font-display text-2xl sm:text-3xl font-extrabold text-[#006c49] min-w-0 flex-1">
                 <span className="text-lg font-bold">{isVesToUsd ? '$' : 'Bs.'}</span>
-                <span className="truncate">
-                  {isVesToUsd
-                    ? calculatedOutput.toFixed(2)
-                    : calculatedOutput.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                </span>
+                {useManualOutput ? (
+                  <input
+                    type="number"
+                    min="0"
+                    step="any"
+                    value={manualOutputStr}
+                    onChange={(e) => setManualOutputStr(e.target.value)}
+                    placeholder="0.00"
+                    autoFocus
+                    className="w-full bg-transparent outline-none font-bold min-w-0 text-[#006c49]"
+                  />
+                ) : (
+                  <span className="truncate">
+                    {isVesToUsd
+                      ? calculatedOutput.toFixed(2)
+                      : calculatedOutput.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </span>
+                )}
               </div>
               <div className="px-3 py-1.5 bg-[#6cf8bb]/50 rounded-full text-xs font-bold text-[#00714d] shrink-0">
                 {isVesToUsd ? 'USD ($)' : 'VES (Bs.)'}
               </div>
             </div>
+            {useManualOutput && inputAmount > 0 && manualOutputAmount > 0 && (
+              <div className="mt-1.5 text-[11px] text-[#434656]">
+                Tasa real aplicada: 1 USD = Bs. {impliedRate.toFixed(2)}
+              </div>
+            )}
             <div className="mt-2 pt-2 border-t border-[#eaedff]">
               <label className="text-xs text-[#737688] block mb-1">Hacia:</label>
               <select
@@ -424,7 +481,13 @@ export const ExchangeModal: React.FC = () => {
           <button
             type="button"
             onClick={handleConfirm}
-            disabled={insufficientBalance || inputAmount <= 0 || receiptMissing || saving}
+            disabled={
+              insufficientBalance ||
+              inputAmount <= 0 ||
+              (useManualOutput && manualOutputAmount <= 0) ||
+              receiptMissing ||
+              saving
+            }
             className="w-full py-3.5 px-4 bg-[#0041c8] hover:bg-[#0036a8] disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-xl font-display font-bold text-sm shadow-[0_4px_16px_rgba(0,65,200,0.25)] flex items-center justify-center gap-2 transition-all active:scale-[0.99]"
           >
             <span>
@@ -432,6 +495,8 @@ export const ExchangeModal: React.FC = () => {
                 ? 'Guardando...'
                 : insufficientBalance
                 ? 'Saldo insuficiente'
+                : useManualOutput && manualOutputAmount <= 0
+                ? 'Ingresa el monto recibido'
                 : receiptMissing
                 ? 'Adjunta un comprobante'
                 : 'Confirmar Operación'}
