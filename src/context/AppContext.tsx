@@ -113,7 +113,7 @@ interface AppContextType {
   setReceiptModalOpen: (open: boolean) => void;
 
   // Quick Actions
-  addTransaction: (tx: Omit<Transaction, 'id' | 'date' | 'createdAt' | 'groupDate' | 'reference' | 'status' | 'businessId'>) => Transaction;
+  addTransaction: (tx: Omit<Transaction, 'id' | 'date' | 'createdAt' | 'groupDate' | 'reference' | 'status' | 'businessId'>) => Transaction | null;
   attachReceipt: (transactionId: string, file: File) => Promise<void>;
   getReceiptUrl: (path: string) => Promise<string | null>;
   hasMoreTransactions: boolean;
@@ -126,7 +126,7 @@ interface AppContextType {
     toAccountId: string,
     customRate?: number,
     isVesToUsd?: boolean
-  ) => Transaction;
+  ) => Transaction | null;
 
   // Toast
   toastMessage: string | null;
@@ -532,8 +532,26 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     // when React next renders, not at this call site, so the assignment
     // never lands in time and the Supabase update below used to never fire
     // at all — balances only ever looked right locally, never persisted.
+    // No floor at 0 — screens that can overdraw an account validate against
+    // its balance before calling this, so this should never actually go
+    // negative. If it ever does (a future bug, a race condition), showing
+    // the real negative number is far better than silently clamping it to
+    // 0 and hiding the discrepancy, which is exactly what made this bug
+    // invisible for so long.
     const targetAccount = accounts.find((acc) => acc.id === newTx.accountId);
-    const newBalance = targetAccount ? Math.max(0, targetAccount.balance + newTx.amount) : null;
+
+    // Single choke point for every call site that debits an account (quick
+    // expenses, loan disbursements, recurring expense payments, etc.) — block
+    // the transaction outright instead of letting it register and clamping
+    // the resulting balance, which is what used to hide shortfalls as 0.
+    if (targetAccount && targetAccount.balance + newTx.amount < 0) {
+      showToast(
+        `Saldo insuficiente en ${targetAccount.name}: tiene ${targetAccount.currency === 'USD' ? formatUSD(targetAccount.balance) : formatVES(targetAccount.balance)} y se necesitan ${targetAccount.currency === 'USD' ? formatUSD(Math.abs(newTx.amount)) : formatVES(Math.abs(newTx.amount))}`
+      );
+      return null;
+    }
+
+    const newBalance = targetAccount ? targetAccount.balance + newTx.amount : null;
 
     if (targetAccount && newBalance !== null) {
       setAccounts((prev) =>
@@ -1284,6 +1302,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const fromAcc = accounts.find((a) => a.id === fromAccountId) || accounts[0];
     const toAcc = accounts.find((a) => a.id === toAccountId) || accounts[1];
 
+    // Validate before touching anything — never let a shortfall be masked
+    // by clamping the resulting balance to 0.
+    if (primaryAmount > fromAcc.balance) {
+      showToast(
+        `Saldo insuficiente en ${fromAcc.name}: tiene ${fromAcc.currency === 'USD' ? formatUSD(fromAcc.balance) : formatVES(fromAcc.balance)} y se necesitan ${fromAcc.currency === 'USD' ? formatUSD(primaryAmount) : formatVES(primaryAmount)}`
+      );
+      return null;
+    }
+
     const exchangeTx: Transaction = {
       id: genId('swap'),
       businessId: effectiveBusinessId,
@@ -1317,7 +1344,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     // from state already in scope, instead of relying on a setAccounts
     // updater's side effect being readable immediately after — it isn't,
     // since React only calls that updater on the next render.
-    const newFromBalance = Math.max(0, fromAcc.balance - primaryAmount);
+    const newFromBalance = fromAcc.balance - primaryAmount;
     const newToBalance = toAcc.balance + secondaryAmount;
 
     setAccounts((prev) =>

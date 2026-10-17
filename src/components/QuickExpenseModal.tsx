@@ -47,6 +47,10 @@ export const QuickExpenseModal: React.FC = () => {
 
   const isEmployeeAccount = employeeAccountIds.has(selectedAccountId);
   const receiptMissing = !isIncome && isEmployeeAccount && !receiptFile;
+  const selectedAccount = availableAccounts.find((a) => a.id === selectedAccountId);
+  const currentAmountForBalanceCheck = parseFloat(amountStr) || 0;
+  const insufficientBalance =
+    !isIncome && !!selectedAccount && currentAmountForBalanceCheck > selectedAccount.balance;
 
   if (availableAccounts.length === 0) {
     return (
@@ -130,6 +134,11 @@ export const QuickExpenseModal: React.FC = () => {
       return;
     }
 
+    if (insufficientBalance) {
+      showToast('Saldo insuficiente en la cuenta seleccionada');
+      return;
+    }
+
     const account = accounts.find((a) => a.id === selectedAccountId) || accounts[0];
     const catObj = categories.find((c) => c.label === selectedCategory) || categories[0];
 
@@ -157,6 +166,11 @@ export const QuickExpenseModal: React.FC = () => {
         bank: account.name,
       }
     });
+
+    if (!newTx) {
+      setSaving(false);
+      return;
+    }
 
     if (receiptFile) {
       await attachReceipt(newTx.id, receiptFile);
@@ -234,7 +248,9 @@ export const QuickExpenseModal: React.FC = () => {
                 value={amountStr}
                 onChange={handleAmountInputChange}
                 onFocus={(e) => e.target.select()}
-                className="bg-transparent outline-none text-center font-display text-4xl sm:text-5xl font-extrabold text-[#131b2e] tracking-tight"
+                className={`bg-transparent outline-none text-center font-display text-4xl sm:text-5xl font-extrabold tracking-tight ${
+                  insufficientBalance ? 'text-red-600' : 'text-[#131b2e]'
+                }`}
                 style={{ width: `${Math.max(2, amountStr.length + 1)}ch` }}
               />
             </div>
@@ -245,6 +261,13 @@ export const QuickExpenseModal: React.FC = () => {
                 Tasa: Bs. {bcvRate.toFixed(2)}
               </span>
             </div>
+            {insufficientBalance && selectedAccount && (
+              <p className="mt-2 text-xs font-semibold text-red-600">
+                Saldo insuficiente en {selectedAccount.name}: tiene{' '}
+                {selectedAccount.currency === 'USD' ? '$' : 'Bs. '}
+                {selectedAccount.balance.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </p>
+            )}
           </div>
 
           {/* Concept input */}
@@ -292,13 +315,16 @@ export const QuickExpenseModal: React.FC = () => {
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 max-h-56 overflow-y-auto pr-0.5">
               {availableAccounts.map((acc) => {
                 const isSelected = selectedAccountId === acc.id;
+                const isInsufficientForThisAccount = isSelected && insufficientBalance;
                 return (
                   <button
                     key={acc.id}
                     type="button"
                     onClick={() => setSelectedAccountId(acc.id)}
                     className={`flex items-center gap-2 p-2.5 rounded-xl text-left border transition-all ${
-                      isSelected
+                      isInsufficientForThisAccount
+                        ? 'bg-red-50 border-red-400 text-red-600 font-bold ring-1 ring-red-400'
+                        : isSelected
                         ? 'bg-[#eaedff] border-[#0041c8] text-[#0041c8] font-bold ring-1 ring-[#0041c8]'
                         : 'bg-white border-[#eaedff] text-[#434656] hover:bg-[#f2f3ff]'
                     }`}
@@ -371,12 +397,14 @@ export const QuickExpenseModal: React.FC = () => {
           <button
             type="button"
             onClick={handleSave}
-            disabled={saving || receiptMissing}
+            disabled={saving || receiptMissing || insufficientBalance}
             className="w-full py-3.5 px-4 bg-[#0041c8] hover:bg-[#0036a8] disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-xl font-display font-bold text-sm shadow-[0_4px_16px_rgba(0,65,200,0.25)] flex items-center justify-center gap-2 transition-all active:scale-[0.99]"
           >
             <span>
               {saving
                 ? 'Guardando...'
+                : insufficientBalance
+                ? 'Saldo insuficiente'
                 : receiptMissing
                 ? 'Adjunta un comprobante'
                 : `${isIncome ? 'Guardar Ingreso' : 'Guardar Gasto'} (${currency === 'USD' ? '$' : 'Bs.'} ${currentAmount.toLocaleString('es-VE', { minimumFractionDigits: 2 })})`}

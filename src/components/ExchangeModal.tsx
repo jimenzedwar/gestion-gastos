@@ -159,6 +159,10 @@ export const ExchangeModal: React.FC = () => {
       effectiveRate,
       isVesToUsd
     );
+    if (!tx) {
+      setSaving(false);
+      return;
+    }
     if (receiptFile) {
       await attachReceipt(tx.id, receiptFile);
     }

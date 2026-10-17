@@ -121,6 +121,7 @@ export const ExchangeScreen: React.FC = () => {
       effectiveRate,
       isVesToUsd
     );
+    if (!tx) return;
 
     setSelectedTx(tx);
     showToast(
