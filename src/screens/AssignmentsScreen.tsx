@@ -139,6 +139,7 @@ export const AssignmentsScreen: React.FC = () => {
     ? businessAccounts.filter((a) => (a.currency === 'USD' && assignModal.hasUSD) || (a.currency === 'VES' && assignModal.hasVES))
     : [];
   const assignSourceAccount = businessAccounts.find((a) => a.id === assignSourceId);
+  const assignInsufficientBalance = !!assignSourceAccount && assignAmount > assignSourceAccount.balance;
 
   const handleConfirmAssign = () => {
     if (!assignModal) return;
@@ -148,6 +149,10 @@ export const AssignmentsScreen: React.FC = () => {
     }
     if (assignAmount <= 0) {
       showToast('Ingresa un monto válido');
+      return;
+    }
+    if (assignInsufficientBalance) {
+      showToast('Saldo insuficiente en la cuenta de origen');
       return;
     }
     assignFundsToEmployee(assignModal.employeeId, assignSourceId, assignAmount);
@@ -511,19 +516,25 @@ export const AssignmentsScreen: React.FC = () => {
                     step="any"
                     value={assignAmount || ''}
                     onChange={(e) => setAssignAmount(parseFloat(e.target.value) || 0)}
-                    className="w-full px-3 py-2 bg-[#f2f3ff] rounded-xl text-sm font-bold outline-none border border-transparent focus:border-[#0041c8] focus:bg-white"
+                    className={`w-full px-3 py-2 bg-[#f2f3ff] rounded-xl text-sm font-bold outline-none border ${assignInsufficientBalance ? 'border-[#ca1c43]' : 'border-transparent'} focus:border-[#0041c8] focus:bg-white`}
                   />
+                  {assignInsufficientBalance && assignSourceAccount && (
+                    <p className="text-[11px] font-semibold text-[#a20030] mt-1">
+                      Saldo insuficiente: {assignSourceAccount.name} tiene{' '}
+                      {assignSourceAccount.currency === 'USD' ? formatUSD(assignSourceAccount.balance) : formatVES(assignSourceAccount.balance)}.
+                    </p>
+                  )}
                 </div>
               </>
             )}
 
             <button
               onClick={handleConfirmAssign}
-              disabled={assignSourceOptions.length === 0}
+              disabled={assignSourceOptions.length === 0 || assignInsufficientBalance}
               className="w-full py-3 px-4 bg-[#0041c8] hover:bg-[#0036a8] disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-xl font-display font-bold text-sm shadow-md flex items-center justify-center gap-2"
             >
               <Wallet className="w-4 h-4" />
-              <span>Confirmar Asignación</span>
+              <span>{assignInsufficientBalance ? 'Saldo insuficiente' : 'Confirmar Asignación'}</span>
             </button>
           </div>
         </div>

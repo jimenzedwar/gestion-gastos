@@ -526,18 +526,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       status: 'Completado con éxito'
     };
 
-    // Update account balances
-    let updatedAccount: Account | null = null;
-    setAccounts((prev) =>
-      prev.map((acc) => {
-        if (acc.id === newTx.accountId) {
-          const delta = newTx.amount;
-          updatedAccount = { ...acc, balance: Math.max(0, acc.balance + delta) };
-          return updatedAccount;
-        }
-        return acc;
-      })
-    );
+    // Compute the new balance synchronously, from the state already available
+    // in this closure — NOT by assigning a variable inside the setAccounts
+    // updater and reading it right after. That updater only actually runs
+    // when React next renders, not at this call site, so the assignment
+    // never lands in time and the Supabase update below used to never fire
+    // at all — balances only ever looked right locally, never persisted.
+    const targetAccount = accounts.find((acc) => acc.id === newTx.accountId);
+    const newBalance = targetAccount ? Math.max(0, targetAccount.balance + newTx.amount) : null;
+
+    if (targetAccount && newBalance !== null) {
+      setAccounts((prev) =>
+        prev.map((acc) => (acc.id === targetAccount.id ? { ...acc, balance: newBalance } : acc))
+      );
+    }
 
     setTransactions((prev) => [newTx, ...prev]);
     setSelectedTx(newTx);
@@ -546,8 +548,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       supabase.from('transactions').insert(transactionToDb(newTx, ownerId || user.id)).then(({ error }) => {
         if (error) syncError('movimiento');
       });
-      if (updatedAccount) {
-        supabase.from('accounts').update({ balance: updatedAccount.balance }).eq('id', updatedAccount.id).then(({ error }) => {
+      if (targetAccount && newBalance !== null) {
+        supabase.from('accounts').update({ balance: newBalance }).eq('id', targetAccount.id).then(({ error }) => {
           if (error) syncError('saldo de cuenta');
         });
       }
@@ -648,14 +650,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const updateEmployee = (employeeId: string, updates: Partial<Omit<Employee, 'id' | 'loans'>>) => {
-    let updatedEmp: Employee | null = null;
-    setEmployees((prev) =>
-      prev.map((e) => {
-        if (e.id !== employeeId) return e;
-        updatedEmp = { ...e, ...updates };
-        return updatedEmp;
-      })
-    );
+    // Same bug as addTransaction: compute the merged employee synchronously
+    // from state already in scope — assigning inside the setEmployees
+    // updater and reading it right after never worked, since that updater
+    // only runs on React's next render, not at this call site.
+    const existingEmp = employees.find((e) => e.id === employeeId);
+    const updatedEmp: Employee | null = existingEmp ? { ...existingEmp, ...updates } : null;
+
+    if (updatedEmp) {
+      setEmployees((prev) => prev.map((e) => (e.id === employeeId ? updatedEmp : e)));
+    }
 
     if (user && updatedEmp) {
       supabase.from('employees').update(employeeToDb(updatedEmp, ownerId || user.id)).eq('id', employeeId).then(({ error }) => {
@@ -827,6 +831,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       showToast('La cuenta de origen y destino no pueden ser la misma');
       return;
     }
+    if (amount > sourceAcc.balance) {
+      showToast(
+        `Saldo insuficiente en ${sourceAcc.name}: tiene ${currency === 'USD' ? formatUSD(sourceAcc.balance) : formatVES(sourceAcc.balance)} y se necesitan ${currency === 'USD' ? formatUSD(amount) : formatVES(amount)}`
+      );
+      return;
+    }
 
     const secondaryAmount = currency === 'USD' ? amount * bcvRate : amount / bcvRate;
 
@@ -926,23 +936,29 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const repayLoan = (employeeId: string, loanId: string, amount: number, accountId?: string) => {
-    let updatedLoan: EmployeeLoan | null = null;
-    setEmployees((prev) =>
-      prev.map((emp) => {
-        if (emp.id !== employeeId) return emp;
-        const updatedLoans = emp.loans.map((loan) => {
-          if (loan.id !== loanId) return loan;
-          const newRemaining = Math.max(0, loan.remainingAmount - amount);
-          updatedLoan = {
-            ...loan,
-            remainingAmount: newRemaining,
-            status: newRemaining <= 0 ? ('paid' as const) : ('active' as const)
-          };
-          return updatedLoan;
-        });
-        return { ...emp, loans: updatedLoans };
-      })
-    );
+    // Same bug as addTransaction/updateEmployee: this whole computation used
+    // to live inside the setEmployees updater, whose callback only actually
+    // runs on React's next render — so updatedLoan was never populated by
+    // the time it was read right after, and the repayment never persisted.
+    const existingEmp = employees.find((e) => e.id === employeeId);
+    const existingLoan = existingEmp?.loans.find((l) => l.id === loanId);
+    const updatedLoan: EmployeeLoan | null = existingLoan
+      ? {
+          ...existingLoan,
+          remainingAmount: Math.max(0, existingLoan.remainingAmount - amount),
+          status: Math.max(0, existingLoan.remainingAmount - amount) <= 0 ? ('paid' as const) : ('active' as const)
+        }
+      : null;
+
+    if (updatedLoan) {
+      setEmployees((prev) =>
+        prev.map((emp) =>
+          emp.id === employeeId
+            ? { ...emp, loans: emp.loans.map((loan) => (loan.id === loanId ? updatedLoan : loan)) }
+            : emp
+        )
+      );
+    }
 
     if (user && updatedLoan) {
       supabase.from('employee_loans')
@@ -1297,19 +1313,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     };
 
-    // Update balances: deduct primaryAmount from fromAccountId, add secondaryAmount to toAccountId
-    let fromUpdated: Account | null = null;
-    let toUpdated: Account | null = null;
+    // Same fix as addTransaction: compute both new balances synchronously
+    // from state already in scope, instead of relying on a setAccounts
+    // updater's side effect being readable immediately after — it isn't,
+    // since React only calls that updater on the next render.
+    const newFromBalance = Math.max(0, fromAcc.balance - primaryAmount);
+    const newToBalance = toAcc.balance + secondaryAmount;
+
     setAccounts((prev) =>
       prev.map((acc) => {
-        if (acc.id === fromAccountId) {
-          fromUpdated = { ...acc, balance: Math.max(0, acc.balance - primaryAmount) };
-          return fromUpdated;
-        }
-        if (acc.id === toAccountId) {
-          toUpdated = { ...acc, balance: acc.balance + secondaryAmount };
-          return toUpdated;
-        }
+        if (acc.id === fromAccountId) return { ...acc, balance: newFromBalance };
+        if (acc.id === toAccountId) return { ...acc, balance: newToBalance };
         return acc;
       })
     );
@@ -1321,16 +1335,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       supabase.from('transactions').insert(transactionToDb(exchangeTx, ownerId || user.id)).then(({ error }) => {
         if (error) syncError('cambio de divisas');
       });
-      if (fromUpdated) {
-        supabase.from('accounts').update({ balance: fromUpdated.balance }).eq('id', fromAccountId).then(({ error }) => {
-          if (error) syncError('saldo de cuenta origen');
-        });
-      }
-      if (toUpdated) {
-        supabase.from('accounts').update({ balance: toUpdated.balance }).eq('id', toAccountId).then(({ error }) => {
-          if (error) syncError('saldo de cuenta destino');
-        });
-      }
+      supabase.from('accounts').update({ balance: newFromBalance }).eq('id', fromAccountId).then(({ error }) => {
+        if (error) syncError('saldo de cuenta origen');
+      });
+      supabase.from('accounts').update({ balance: newToBalance }).eq('id', toAccountId).then(({ error }) => {
+        if (error) syncError('saldo de cuenta destino');
+      });
     }
 
     return exchangeTx;

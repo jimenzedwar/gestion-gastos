@@ -408,7 +408,7 @@ export const ExchangeModal: React.FC = () => {
                 <label className="flex items-center justify-center gap-2 w-full py-3 px-4 bg-white border border-dashed border-[#c3c5d9] rounded-xl text-xs font-semibold text-[#434656] cursor-pointer hover:border-[#0041c8] hover:text-[#0041c8] transition-colors">
                   <Camera className="w-4 h-4" />
                   <span>Tomar foto o elegir archivo</span>
-                  <input type="file" accept="image/*" capture="environment" onChange={handleFileChange} className="hidden" />
+                  <input type="file" accept="image/*" onChange={handleFileChange} className="hidden" />
                 </label>
               )}
             </div>
