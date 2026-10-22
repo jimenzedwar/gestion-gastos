@@ -39,6 +39,7 @@ export const AssignmentsScreen: React.FC = () => {
     openQuickExpenseForAccount,
     openExchangeForAccounts,
     assignFundsToEmployee,
+    activeBusinessName,
     showToast
   } = useApp();
 
@@ -137,6 +138,12 @@ export const AssignmentsScreen: React.FC = () => {
 
   const assignSourceOptions = assignModal
     ? businessAccounts.filter((a) => (a.currency === 'USD' && assignModal.hasUSD) || (a.currency === 'VES' && assignModal.hasVES))
+    : [];
+  const assignMissingCurrencies = assignModal
+    ? [
+        assignModal.hasUSD && !businessAccounts.some((a) => a.currency === 'USD') ? 'USD' : null,
+        assignModal.hasVES && !businessAccounts.some((a) => a.currency === 'VES') ? 'VES (Bs.)' : null
+      ].filter((c): c is string => !!c)
     : [];
   const assignSourceAccount = businessAccounts.find((a) => a.id === assignSourceId);
   const assignInsufficientBalance = !!assignSourceAccount && assignAmount > assignSourceAccount.balance;
@@ -481,7 +488,10 @@ export const AssignmentsScreen: React.FC = () => {
 
             {assignSourceOptions.length === 0 ? (
               <p className="text-xs text-[#a20030] font-semibold">
-                No tienes una cuenta del negocio en una moneda que este empleado pueda recibir.
+                "{activeBusinessName}" no tiene ninguna cuenta propia
+                {assignMissingCurrencies.length > 0 ? ` en ${assignMissingCurrencies.join(' ni ')}` : ''} — crea
+                una cuenta nueva en Cuentas (con este negocio activo) para poder asignarle dinero a{' '}
+                {assignModal.employeeName}.
               </p>
             ) : (
               <>

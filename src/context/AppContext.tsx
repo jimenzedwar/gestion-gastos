@@ -625,7 +625,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (!user || loadingMoreTransactions || !hasMoreTransactions) return;
     setLoadingMoreTransactions(true);
 
-    const oldest = transactions.length > 0 ? transactions[transactions.length - 1].createdAt : null;
+    const oldest = scopedTransactions.length > 0 ? scopedTransactions[scopedTransactions.length - 1].createdAt : null;
     let query = supabase
       .from('transactions')
       .select('*')
@@ -929,7 +929,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     // If a payout account is provided, record disbursement expense
     if (loanData.payFromAccountId) {
-      const sourceAcc = accounts.find((a) => a.id === loanData.payFromAccountId) || accounts[0];
+      const sourceAcc = scopedAccounts.find((a) => a.id === loanData.payFromAccountId) || scopedAccounts[0];
       const isUSD = sourceAcc.currency === 'USD';
       const amtUSD = loanData.totalAmount;
       const amtVES = amtUSD * bcvRate;
@@ -988,7 +988,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
 
     if (accountId) {
-      const destAcc = accounts.find((a) => a.id === accountId) || accounts[0];
+      const destAcc = scopedAccounts.find((a) => a.id === accountId) || scopedAccounts[0];
       const isUSD = destAcc.currency === 'USD';
       addTransaction({
         title: 'Abono / Pago de Préstamo de Empleado',
@@ -1018,7 +1018,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   ): PayrollPayment | null => {
     const emp = employees.find((e) => e.id === employeeId);
     if (!emp) return null;
-    if (accounts.length === 0) {
+    if (scopedAccounts.length === 0) {
       showToast('Agrega una cuenta antes de pagar la nómina');
       return null;
     }
@@ -1050,7 +1050,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const netUSD = Math.max(0, baseUSD - totalDeductionUSD);
     const netVES = netUSD * rate;
 
-    const sourceAcc = accounts.find((a) => a.id === accountId) || accounts[0];
+    const sourceAcc = scopedAccounts.find((a) => a.id === accountId) || scopedAccounts[0];
     const isSourceUSD = sourceAcc.currency === 'USD';
 
     // Mixed payment: part of the net paid from a second account (e.g. cash USD + Bs.)
@@ -1177,13 +1177,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const payRecurringExpense = (expenseId: string, accountId?: string) => {
     const expense = recurringExpenses.find((e) => e.id === expenseId);
     if (!expense) return;
-    if (accounts.length === 0) {
+    if (scopedAccounts.length === 0) {
       showToast('Agrega una cuenta antes de pagar este gasto');
       return;
     }
 
-    const targetAccountId = accountId || expense.accountId || accounts[0].id;
-    const sourceAcc = accounts.find((a) => a.id === targetAccountId) || accounts[0];
+    const targetAccountId = accountId || expense.accountId || scopedAccounts[0].id;
+    const sourceAcc = scopedAccounts.find((a) => a.id === targetAccountId) || scopedAccounts[0];
     const isUSD = sourceAcc.currency === 'USD';
     const expIsUSD = expense.currency === 'USD';
 
@@ -1299,8 +1299,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   ) => {
     const rateUsed = customRate || bcvRate;
     const randomNum = Math.floor(1000000 + Math.random() * 9000000);
-    const fromAcc = accounts.find((a) => a.id === fromAccountId) || accounts[0];
-    const toAcc = accounts.find((a) => a.id === toAccountId) || accounts[1];
+    const fromAcc = scopedAccounts.find((a) => a.id === fromAccountId) || scopedAccounts[0];
+    const toAcc = scopedAccounts.find((a) => a.id === toAccountId) || scopedAccounts[1];
 
     // Validate before touching anything — never let a shortfall be masked
     // by clamping the resulting balance to 0.
