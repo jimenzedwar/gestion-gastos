@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
-import { Currency } from '../types';
 import { QUICK_CATEGORIES, INCOME_CATEGORIES } from '../data/mockData';
 import { X, Delete, ArrowRight, CreditCard, Smartphone, Banknote, Camera, Trash2 } from 'lucide-react';
 
@@ -25,7 +24,6 @@ export const QuickExpenseModal: React.FC = () => {
     ? accounts.filter((a) => accountScope.includes(a.id))
     : businessAccounts;
 
-  const [currency, setCurrency] = useState<Currency>('USD');
   const [amountStr, setAmountStr] = useState<string>('0');
   const [commissionStr, setCommissionStr] = useState<string>('');
   const [concept, setConcept] = useState<string>('');
@@ -50,6 +48,11 @@ export const QuickExpenseModal: React.FC = () => {
   const isEmployeeAccount = employeeAccountIds.has(selectedAccountId);
   const receiptMissing = !isIncome && isEmployeeAccount && !receiptFile;
   const selectedAccount = availableAccounts.find((a) => a.id === selectedAccountId);
+  // The amount typed is always in the SELECTED ACCOUNT's own currency — never
+  // an independent toggle the user could leave mismatched with the account
+  // (that's exactly what produced a real $24,229 "lunch" expense: a Bs.
+  // amount typed while the toggle still said USD).
+  const currency = selectedAccount?.currency ?? 'USD';
   const currentAmountForBalanceCheck = parseFloat(amountStr) || 0;
   const commissionAmount = isIncome ? 0 : parseFloat(commissionStr) || 0;
   const insufficientBalance =
@@ -219,13 +222,20 @@ export const QuickExpenseModal: React.FC = () => {
 
         {/* Modal Body */}
         <div className="p-5 space-y-4">
-          {/* Currency Toggle */}
+          {/* Currency Toggle — picks the first account in that currency rather
+              than setting an independent flag, so the amount you type can
+              never end up tagged with a currency that doesn't match the
+              account it's actually being deducted from. */}
           <div className="flex justify-center">
             <div className="bg-[#eaedff] p-1 rounded-full flex gap-1 w-48 shadow-inner">
               <button
                 type="button"
-                onClick={() => setCurrency('USD')}
-                className={`flex-1 py-1.5 rounded-full text-xs font-bold transition-all ${
+                disabled={!availableAccounts.some((a) => a.currency === 'USD')}
+                onClick={() => {
+                  const acc = availableAccounts.find((a) => a.currency === 'USD');
+                  if (acc) setSelectedAccountId(acc.id);
+                }}
+                className={`flex-1 py-1.5 rounded-full text-xs font-bold transition-all disabled:opacity-40 disabled:cursor-not-allowed ${
                   currency === 'USD'
                     ? 'bg-[#0041c8] text-white shadow-xs'
                     : 'text-[#434656] hover:text-[#131b2e]'
@@ -235,8 +245,12 @@ export const QuickExpenseModal: React.FC = () => {
               </button>
               <button
                 type="button"
-                onClick={() => setCurrency('VES')}
-                className={`flex-1 py-1.5 rounded-full text-xs font-bold transition-all ${
+                disabled={!availableAccounts.some((a) => a.currency === 'VES')}
+                onClick={() => {
+                  const acc = availableAccounts.find((a) => a.currency === 'VES');
+                  if (acc) setSelectedAccountId(acc.id);
+                }}
+                className={`flex-1 py-1.5 rounded-full text-xs font-bold transition-all disabled:opacity-40 disabled:cursor-not-allowed ${
                   currency === 'VES'
                     ? 'bg-[#0041c8] text-white shadow-xs'
                     : 'text-[#434656] hover:text-[#131b2e]'

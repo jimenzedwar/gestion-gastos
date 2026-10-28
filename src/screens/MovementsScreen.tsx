@@ -130,6 +130,16 @@ export const MovementsScreen: React.FC = () => {
     let exchangedUSD = 0;
     let exchangeCount = 0;
 
+    // Balance Neto, kept per currency — USD and VES are separate wallets in
+    // real life (you can't cover a Bs. shortfall with USD without an actual
+    // cambio), so pooling them into one converted figure hid, rather than
+    // showed, which currency was actually in the red. A cambio moves real
+    // value out of one currency and into the other, so both of its legs
+    // count here: tx.amount in its own tx.currency, and tx.secondaryAmount
+    // (the other side of the same row) in the opposite currency.
+    let netUSDNative = 0;
+    let netVESNative = 0;
+
     transactions.forEach((tx) => {
       const rate = tx.rate || bcvRate;
       if (tx.type === 'expense') {
@@ -142,6 +152,20 @@ export const MovementsScreen: React.FC = () => {
         exchangedUSD += tx.currency === 'USD' ? tx.amount : Math.abs(tx.secondaryAmount);
         exchangeCount += 1;
       }
+
+      if (tx.type === 'income' || tx.type === 'expense') {
+        if (tx.currency === 'USD') netUSDNative += tx.amount;
+        else netVESNative += tx.amount;
+      } else if (tx.type === 'exchange') {
+        const otherAmount = tx.secondaryAmount || 0;
+        if (tx.currency === 'USD') {
+          netUSDNative += tx.amount;
+          netVESNative += otherAmount;
+        } else {
+          netVESNative += tx.amount;
+          netUSDNative += otherAmount;
+        }
+      }
     });
 
     return {
@@ -151,7 +175,8 @@ export const MovementsScreen: React.FC = () => {
       incomeCount,
       exchangedUSD,
       exchangeCount,
-      netUSD: incomeUSD - expenseUSD
+      netUSDNative,
+      netVESNative
     };
   }, [transactions, bcvRate]);
 
@@ -228,11 +253,16 @@ export const MovementsScreen: React.FC = () => {
 
         <div className="p-3.5 sm:p-4 bg-white rounded-2xl border border-[#eaedff] shadow-[0_2px_10px_rgba(19,27,46,0.03)]">
           <div className="text-xs font-semibold text-[#737688]">Balance Neto</div>
-          <div className={`font-display text-lg sm:text-xl font-bold mt-1 truncate ${metrics.netUSD >= 0 ? 'text-[#006c49]' : 'text-[#a20030]'}`}>
-            {formatUSD(metrics.netUSD, true)}
+          <div className="mt-1 space-y-0.5">
+            <div className={`font-display text-base sm:text-lg font-bold truncate ${metrics.netUSDNative >= 0 ? 'text-[#006c49]' : 'text-[#a20030]'}`}>
+              {formatUSD(metrics.netUSDNative, true)}
+            </div>
+            <div className={`font-display text-base sm:text-lg font-bold truncate ${metrics.netVESNative >= 0 ? 'text-[#006c49]' : 'text-[#a20030]'}`}>
+              {formatVES(metrics.netVESNative, true)}
+            </div>
           </div>
-          <div className={`text-[11px] font-medium mt-0.5 truncate ${metrics.netUSD >= 0 ? 'text-[#006c49]' : 'text-[#a20030]'}`}>
-            {metrics.netUSD >= 0 ? 'Ahorro activo positivo' : 'Gastaste más de lo que ingresó'}
+          <div className="text-[11px] text-[#737688] font-medium mt-0.5 truncate">
+            Por moneda, sin convertir — cada cuenta es un fondo aparte
           </div>
         </div>
       </div>
